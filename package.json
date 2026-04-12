@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "\uD83C\uDF55 Pizza \u2014 Pi with toppings",
   "type": "module",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "bin": {
     "pizza": "./dist/cli.js"
   },
