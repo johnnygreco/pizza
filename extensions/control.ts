@@ -125,6 +125,7 @@ interface RpcSubscribeCommand {
 	type: "subscribe";
 	event: "turn_end";
 	id?: string;
+	skipTurns?: number;
 }
 
 type RpcCommand =
@@ -142,6 +143,7 @@ type RpcCommand =
 interface TurnEndSubscription {
 	socket: net.Socket;
 	subscriptionId: string;
+	skipTurns: number;
 }
 
 interface SocketState {
@@ -224,7 +226,7 @@ function getSessionAlias(ctx: ExtensionContext): string | null {
 }
 
 async function ensureControlDir(): Promise<void> {
-	await fs.mkdir(CONTROL_DIR, { recursive: true });
+	await fs.mkdir(CONTROL_DIR, { recursive: true, mode: 0o700 });
 }
 
 async function removeSocket(socketPath: string | null): Promise<void> {
@@ -625,7 +627,8 @@ async function handleCommand(
 	if (command.type === "subscribe") {
 		if (command.event === "turn_end") {
 			const subscriptionId = id ?? `sub_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-			state.turnEndSubscriptions.push({ socket, subscriptionId });
+			const skipTurns = command.skipTurns && command.skipTurns > 0 ? command.skipTurns : 0;
+			state.turnEndSubscriptions.push({ socket, subscriptionId, skipTurns });
 
 			const cleanup = () => {
 				const idx = state.turnEndSubscriptions.findIndex((s) => s.subscriptionId === subscriptionId);
@@ -821,6 +824,9 @@ async function createServer(pi: ExtensionAPI, state: SocketState, socketPath: st
 		});
 	});
 
+	// Restrict socket to owner only
+	await fs.chmod(socketPath, 0o600);
+
 	return server;
 }
 
@@ -854,12 +860,6 @@ async function sendRpcCommand(
 
 		socket.on("connect", () => {
 			socket.write(`${JSON.stringify(command)}\n`);
-
-			// If waiting for turn_end, also subscribe
-			if (waitForEvent === "turn_end") {
-				const subscribeCmd: RpcSubscribeCommand = { type: "subscribe", event: "turn_end" };
-				socket.write(`${JSON.stringify(subscribeCmd)}\n`);
-			}
 		});
 
 		socket.on("data", (chunk) => {
@@ -885,6 +885,14 @@ async function sendRpcCommand(
 								resolve({ response: response! });
 								return;
 							}
+							// Subscribe now that we know whether the session was busy
+							const wasBusy = (response.data as { mode?: string } | undefined)?.mode !== "direct";
+							const subscribeCmd: RpcSubscribeCommand = {
+								type: "subscribe",
+								event: "turn_end",
+								skipTurns: wasBusy ? 1 : 0,
+							};
+							socket.write(`${JSON.stringify(subscribeCmd)}\n`);
 						}
 						// Ignore subscribe response
 						continue;
@@ -1087,15 +1095,26 @@ export default function (pi: ExtensionAPI) {
 	pi.on("turn_end", (event: TurnEndEvent, ctx: ExtensionContext) => {
 		if (state.turnEndSubscriptions.length === 0) return;
 
+		// Fire to ready subscribers (one-shot), keep those still skipping
+		const ready: TurnEndSubscription[] = [];
+		const pending: TurnEndSubscription[] = [];
+		for (const sub of state.turnEndSubscriptions) {
+			if (sub.skipTurns > 0) {
+				sub.skipTurns--;
+				pending.push(sub);
+			} else {
+				ready.push(sub);
+			}
+		}
+		state.turnEndSubscriptions = pending;
+
+		if (ready.length === 0) return;
+
 		void syncAlias(state, ctx);
 		const lastMessage = getLastAssistantMessage(ctx);
 		const eventData = { message: lastMessage, turnIndex: event.turnIndex };
 
-		// Fire to all subscribers (one-shot)
-		const subscriptions = [...state.turnEndSubscriptions];
-		state.turnEndSubscriptions = [];
-
-		for (const sub of subscriptions) {
+		for (const sub of ready) {
 			writeEvent(sub.socket, {
 				type: "event",
 				event: "turn_end",
@@ -1127,7 +1146,7 @@ Target selection:
 - sessionName: session name (alias from /name).
 
 Wait behavior (only for action=send):
-- wait_until=turn_end: Wait for the turn to complete, returns last assistant message.
+- wait_until=turn_end: Wait for the turn triggered by this message to complete, returns its last assistant message. If the target session is busy, the in-flight turn is skipped automatically.
 - wait_until=message_processed: Returns immediately after message is queued.
 
 CLI bridge (for shell scripts/background jobs):

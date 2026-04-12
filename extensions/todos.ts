@@ -23,7 +23,7 @@
  * Defaults:
  * {
  *   "gc": true,   // delete closed todos older than gcDays on startup
- *   "gcDays": 7   // age threshold for GC (days since created_at)
+ *   "gcDays": 7   // age threshold for GC (days since closed_at, falls back to created_at)
  * }
  *
  * Use `/todos` to bring up the visual todo manager or just let the LLM use them
@@ -70,6 +70,7 @@ interface TodoFrontMatter {
 	tags: string[];
 	status: string;
 	created_at: string;
+	closed_at?: string;
 	assigned_to_session?: string;
 }
 
@@ -181,6 +182,11 @@ export function isTodoClosed(status: string): boolean {
 function clearAssignmentIfClosed(todo: TodoFrontMatter): void {
 	if (isTodoClosed(getTodoStatus(todo))) {
 		todo.assigned_to_session = undefined;
+		if (!todo.closed_at) {
+			todo.closed_at = new Date().toISOString();
+		}
+	} else {
+		todo.closed_at = undefined;
 	}
 }
 
@@ -782,9 +788,9 @@ async function garbageCollectTodos(todosDir: string, settings: TodoSettings): Pr
 					const { frontMatter } = splitFrontMatter(content);
 					const parsed = parseFrontMatter(frontMatter, id);
 					if (!isTodoClosed(parsed.status)) return;
-					const createdAt = Date.parse(parsed.created_at);
-					if (!Number.isFinite(createdAt)) return;
-					if (createdAt < cutoff) {
+					const closedAt = Date.parse(parsed.closed_at || parsed.created_at);
+					if (!Number.isFinite(closedAt)) return;
+					if (closedAt < cutoff) {
 						await fs.unlink(filePath);
 					}
 				} catch {
@@ -822,6 +828,7 @@ export function parseFrontMatter(text: string, idFallback: string): TodoFrontMat
 		if (typeof parsed.title === "string") data.title = parsed.title;
 		if (typeof parsed.status === "string" && parsed.status) data.status = parsed.status;
 		if (typeof parsed.created_at === "string") data.created_at = parsed.created_at;
+		if (typeof parsed.closed_at === "string" && parsed.closed_at) data.closed_at = parsed.closed_at;
 		if (typeof parsed.assigned_to_session === "string" && parsed.assigned_to_session.trim()) {
 			data.assigned_to_session = parsed.assigned_to_session;
 		}
@@ -896,12 +903,8 @@ export function parseTodoContent(content: string, idFallback: string): TodoRecor
 	const { frontMatter, body } = splitFrontMatter(content);
 	const parsed = parseFrontMatter(frontMatter, idFallback);
 	return {
+		...parsed,
 		id: idFallback,
-		title: parsed.title,
-		tags: parsed.tags ?? [],
-		status: parsed.status,
-		created_at: parsed.created_at,
-		assigned_to_session: parsed.assigned_to_session,
 		body: body ?? "",
 	};
 }
@@ -914,6 +917,7 @@ export function serializeTodo(todo: TodoRecord): string {
 			tags: todo.tags ?? [],
 			status: todo.status,
 			created_at: todo.created_at,
+			closed_at: todo.closed_at || undefined,
 			assigned_to_session: todo.assigned_to_session || undefined,
 		},
 		null,
@@ -1044,14 +1048,7 @@ async function listTodos(todosDir: string): Promise<TodoFrontMatter[]> {
 			const content = await fs.readFile(filePath, "utf8");
 			const { frontMatter } = splitFrontMatter(content);
 			const parsed = parseFrontMatter(frontMatter, id);
-			todos.push({
-				id,
-				title: parsed.title,
-				tags: parsed.tags ?? [],
-				status: parsed.status,
-				created_at: parsed.created_at,
-				assigned_to_session: parsed.assigned_to_session,
-			});
+			todos.push(parsed);
 		} catch {
 			// ignore unreadable todo
 		}
@@ -1077,14 +1074,7 @@ function listTodosSync(todosDir: string): TodoFrontMatter[] {
 			const content = readFileSync(filePath, "utf8");
 			const { frontMatter } = splitFrontMatter(content);
 			const parsed = parseFrontMatter(frontMatter, id);
-			todos.push({
-				id,
-				title: parsed.title,
-				tags: parsed.tags ?? [],
-				status: parsed.status,
-				created_at: parsed.created_at,
-				assigned_to_session: parsed.assigned_to_session,
-			});
+			todos.push(parsed);
 		} catch {
 			// ignore
 		}
