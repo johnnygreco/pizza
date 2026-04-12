@@ -13,7 +13,7 @@ export default function status(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("status", {
-    description: "Show pizza harness version and status",
+    description: "Show \u{1F355} Pizza version and status",
     handler: async (_args, ctx) => {
       ctx.ui.notify(`\u{1F355} pizza v${VERSION}`, "info");
     },

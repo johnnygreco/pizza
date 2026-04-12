@@ -43,5 +43,10 @@ describe("config", () => {
       process.env.PIZZA_DIR = "~/my-pizza";
       expect(getPizzaDir()).toBe(resolve(homedir(), "my-pizza"));
     });
+
+    it("expands bare tilde", () => {
+      process.env.PIZZA_DIR = "~";
+      expect(getPizzaDir()).toBe(homedir());
+    });
   });
 });

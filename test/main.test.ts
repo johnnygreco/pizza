@@ -1,9 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { getShippedExtensions, buildPiArgs } from "../src/main.js";
-
-const srcDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "src");
 
 describe("getShippedExtensions", () => {
   it("returns an array of absolute paths", () => {
@@ -43,3 +40,7 @@ describe("buildPiArgs", () => {
     expect(args).toEqual(["-e", "/a/ext.js"]);
   });
 });
+
+// resolvePiMain uses import.meta.resolve which is only available in
+// native Node ESM, not vitest's module transform. It's exercised by
+// the smoke test (node dist/cli.js --help) instead.

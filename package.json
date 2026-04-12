@@ -1,7 +1,7 @@
 {
   "name": "pizza",
   "version": "0.1.0",
-  "description": "A personal coding agent harness built on Pi",
+  "description": "\uD83C\uDF55 Pizza \u2014 Pi with your personal toppings",
   "type": "module",
   "license": "MIT",
   "bin": {
@@ -26,7 +26,8 @@
     "build": "tsc && chmod +x dist/cli.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build && npm test"
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "^0.66.1"

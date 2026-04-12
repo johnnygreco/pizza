@@ -12,6 +12,9 @@ export const CONFIG_DIR = ".pizza";
 export function getPizzaDir(): string {
   const envDir = process.env.PIZZA_DIR;
   if (envDir) {
+    if (envDir === "~") {
+      return homedir();
+    }
     if (envDir.startsWith("~/")) {
       return resolve(homedir(), envDir.slice(2));
     }

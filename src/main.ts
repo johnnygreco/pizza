@@ -1,4 +1,5 @@
 import { resolve, dirname } from "node:path";
+import { existsSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { getPizzaDir } from "./config.js";
 
@@ -20,13 +21,29 @@ export function buildPiArgs(
 
 /**
  * Resolve Pi's main module from our dependency.
- * Uses import.meta.resolve to find the package entry, then derives
- * the path to main.js in the same dist directory.
+ * Uses import.meta.resolve (native Node ESM) to find the package entry,
+ * then derives the path to main.js in the same dist directory.
  */
-function resolvePiMain(): string {
-  const piEntry = import.meta.resolve("@mariozechner/pi-coding-agent");
-  const piDistDir = dirname(fileURLToPath(piEntry));
-  return resolve(piDistDir, "main.js");
+export function resolvePiMain(): string {
+  let piEntry: string;
+  try {
+    piEntry = import.meta.resolve("@mariozechner/pi-coding-agent");
+  } catch {
+    throw new Error(
+      "Could not resolve @mariozechner/pi-coding-agent. " +
+        "Is it installed? Run: npm install",
+    );
+  }
+
+  const piMainPath = resolve(dirname(fileURLToPath(piEntry)), "main.js");
+  if (!existsSync(piMainPath)) {
+    throw new Error(
+      `Pi's main.js not found at ${piMainPath}. ` +
+        "The package layout may have changed — check your pi-coding-agent version.",
+    );
+  }
+
+  return piMainPath;
 }
 
 /**
