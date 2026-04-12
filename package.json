@@ -1,10 +1,12 @@
 {
   "name": "pizza-pi",
-  "version": "0.1.0",
-  "description": "\uD83C\uDF55 Pizza \u2014 Pi with toppings",
+  "version": "0.1.1",
+  "description": "🍕 Pizza — Pi with toppings",
   "type": "module",
   "license": "Apache-2.0",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/johnnygreco/pizza.git"
@@ -18,15 +20,21 @@
       "extensions",
       "node_modules/pi-interactive-subagents"
     ],
-    "skills": ["skills"],
-    "prompts": ["prompts"]
+    "skills": [
+      "skills"
+    ],
+    "prompts": [
+      "prompts"
+    ]
   },
   "files": [
     "extensions",
     "skills",
     "prompts"
   ],
-  "bundledDependencies": ["pi-interactive-subagents"],
+  "bundledDependencies": [
+    "pi-interactive-subagents"
+  ],
   "engines": {
     "node": ">=20.6.0"
   },
