@@ -1,67 +1,87 @@
 # 🍕 Pizza
 
-Pi with your personal toppings.
+Pi with toppings.
 
-Pizza is a coding agent harness built on [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent). It runs Pi's runtime with your own extensions, config, and tooling layered on top. Single npm install, one command.
+Pizza is [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) with some additional features. It's fully Pi-compatible — same extensions, tools, models, and workflows — with a few extras on top.
 
 ## Install
 
-```
+```bash
 npm install -g pizza
 ```
 
-Requires Node.js >= 20.6.0.
+Requires Node.js `>= 20.6.0`.
 
 ## Usage
 
-```
-pizza [options] [messages...]
+```text
+pizza [options] [@files...] [messages...]
 ```
 
-All of Pi's flags and commands work. Run `pizza --help` for the full list.
+Run `pizza --help` for the full command list.
 
 On first run, authenticate with a provider:
 
-```
+```text
 pizza
 # then use /login inside the session
 ```
 
-## Architecture
+### Examples
 
-Pizza runs Pi in-process. It is not a fork, not a subprocess wrapper — it imports Pi's bootstrap directly and calls it with pizza's configuration.
+```bash
+# Start an interactive session
+pizza
 
-**What pizza controls:**
+# One-shot prompt (non-interactive)
+pizza -p "List all .ts files in src/"
 
-- `--version` and `--help` — pizza intercepts these and shows its own branding
-- Global config directory — `~/.pizza/` instead of `~/.pi/agent/` (override with `PIZZA_DIR`)
-- Shipped extensions — always loaded via Pi's `-e` flag
-- In-session UI — status bar, `/status` command, and any future extensions
-- User extensions — discovered from `~/.pizza/extensions/`
+# Attach files as context
+pizza @prompt.md "Summarize this plan"
 
-**What Pi controls:**
+# Pick a model
+pizza --model openai/gpt-4o "Help me refactor this code"
 
-- Everything else: session management, TUI, tools, model selection, arg parsing
-- Project-local config still uses `.pi/` directories (Pi's namespace)
-- Runtime strings (tool descriptions, model names) come from Pi
+# Cycle between models with thinking levels
+pizza --models sonnet:high,haiku:low
 
-This is intentional. Pizza pushes Pi's extension system as far as it goes rather than reimplementing Pi's internals.
+# Restrict tools
+pizza --tools read,grep,find,ls -p "Review the code in src/"
 
-### Integration boundary
-
-Pizza resolves Pi's internal `main.js` via `import.meta.resolve` — this path is not part of Pi's public exports. The `~` semver pin and an `existsSync` guard catch breakage from layout changes, but this is the most fragile point in the harness. If Pi ever exports `main()` publicly, pizza should switch to that.
-
-### File layout
-
+# Continue or resume a session
+pizza --continue "What did we discuss?"
+pizza --resume
 ```
-src/
-├── cli.ts              # Entry point — sets process title, calls main()
-├── main.ts             # Intercepts --version/--help, resolves Pi, injects extensions
-├── config.ts           # VERSION (from package.json), paths, config dir
-├── index.ts            # Public API
-└── extensions/
-    └── status.ts       # Shipped extension: status bar + /status command
+
+### Package Commands
+
+```bash
+pizza install <source> [-l]     # Install an extension
+pizza remove <source> [-l]      # Remove an extension
+pizza update [source]           # Update extensions
+pizza list                      # List installed extensions
+pizza config                    # Show configuration overview
 ```
+
+Pass `-l` to install or remove from project-local settings instead of global.
+
+## Configuration
+
+Pizza keeps its config under `~/.pizza/` (override with `PIZZA_DIR`):
+
+```text
+~/.pizza/
+├── extensions/       # Extensions
+├── prompts/          # Prompt templates
+├── skills/           # Skills
+├── themes/           # Themes
+├── auth.json         # Provider credentials
+└── models.json       # Model configuration
+```
+
+Project-local `.pizza/` directories layer on top of global config. Pi's `.pi/` project settings still apply.
+
+Run `pizza config` to see the full resolved configuration.
 
 ## Development
 
@@ -72,6 +92,26 @@ npm test
 
 # Run locally
 node dist/cli.js --help
+node dist/cli.js config
+```
+
+### File Layout
+
+```text
+src/
+├── cli.ts                  # Binary entry point
+├── app.ts                  # Bootstrap flow
+├── args.ts                 # Argument parsing and help
+├── runtime.ts              # Runtime and service creation
+├── session-target.ts       # Session selection and fork/continue logic
+├── model-selection.ts      # Model resolution and scoped-model handling
+├── package-commands.ts     # install/remove/update/list/config commands
+├── files.ts                # @file and stdin prompt assembly
+├── diagnostics.ts          # Startup/runtime diagnostics
+├── config.ts               # Version and path model
+├── index.ts                # Public API
+└── extensions/
+    └── pizza-ui.ts         # /pizza and /status commands
 ```
 
 ## License

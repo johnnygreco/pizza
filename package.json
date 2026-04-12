@@ -1,7 +1,7 @@
 {
   "name": "pizza",
   "version": "0.1.0",
-  "description": "\uD83C\uDF55 Pizza \u2014 Pi with your personal toppings",
+  "description": "\uD83C\uDF55 Pizza \u2014 Pi with toppings",
   "type": "module",
   "license": "MIT",
   "bin": {
@@ -31,7 +31,7 @@
     "prepublishOnly": "npm run clean && npm run build && npm test"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "~0.66.1"
+    "@mariozechner/pi-coding-agent": "0.66.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

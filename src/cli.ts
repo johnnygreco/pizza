@@ -3,6 +3,6 @@
 process.title = "pizza";
 process.env.PIZZA = "true";
 
-import { main } from "./main.js";
+import { main } from "./app.js";
 
-main(process.argv.slice(2));
+void main(process.argv.slice(2));

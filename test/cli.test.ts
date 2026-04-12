@@ -20,26 +20,32 @@ function run(...args: string[]) {
 }
 
 describe("CLI integration", () => {
-  it("--version shows pizza's version, not Pi's", () => {
+  it("--version shows pizza and version", () => {
     const { stdout, status } = run("--version");
     expect(status).toBe(0);
-    expect(stdout).toContain("Pizza");
+    expect(stdout).toContain("pizza");
     expect(stdout).toContain(pkg.version);
   });
 
-  it("--help shows pizza banner with config paths", () => {
+  it("--help shows Pizza help text", () => {
     const { stdout } = run("--help");
-    expect(stdout).toContain("Pizza");
-    expect(stdout).toContain(pkg.version);
+    expect(stdout).toContain("Pi with toppings");
     expect(stdout).toContain("PIZZA_DIR");
     expect(stdout).toContain(".pizza");
+    expect(stdout).toContain("pizza install <source> [-l]");
   });
 
-  it("--help includes Pi's flag documentation", () => {
-    const { stdout, stderr } = run("--help");
-    // Pi may write help to stdout or stderr — check both
-    const combined = stdout + stderr;
-    expect(combined).toContain("--model");
-    expect(combined).toContain("--provider");
+  it("config shows .pizza roots and .pi settings note", () => {
+    const { stdout, status } = run("config");
+    expect(status).toBe(0);
+    expect(stdout).toContain("Pizza configuration overview");
+    expect(stdout).toContain(".pizza");
+    expect(stdout).toContain(".pi/settings.json");
+  });
+
+  it("--list-models can resolve an exact model search", () => {
+    const { stdout, status } = run("--list-models", "openai/gpt-4o");
+    expect(status).toBe(0);
+    expect(stdout).toContain("openai/gpt-4o");
   });
 });
