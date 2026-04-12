@@ -1,12 +1,21 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { VERSION, APP_NAME, CONFIG_DIR, getPizzaDir } from "../src/config.js";
-import { resolve } from "node:path";
 import { homedir } from "node:os";
+
+const pkg = JSON.parse(
+  readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "..", "package.json"),
+    "utf-8",
+  ),
+);
 
 describe("config", () => {
   describe("constants", () => {
-    it("exports a semver VERSION", () => {
-      expect(VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+    it("VERSION matches package.json", () => {
+      expect(VERSION).toBe(pkg.version);
     });
 
     it("APP_NAME is pizza", () => {

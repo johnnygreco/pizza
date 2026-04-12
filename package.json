@@ -24,13 +24,14 @@
   "scripts": {
     "dev": "tsc --watch",
     "build": "tsc && chmod +x dist/cli.js",
+    "pretest": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run clean && npm run build && npm test"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.66.1"
+    "@mariozechner/pi-coding-agent": "~0.66.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

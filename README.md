@@ -27,27 +27,41 @@ pizza
 # then use /login inside the session
 ```
 
-## How it works
+## Architecture
 
-🍕 Pizza is not a fork of Pi or a wrapper around it. It runs Pi's runtime in-process with its own identity:
+Pizza runs Pi in-process. It is not a fork, not a subprocess wrapper — it imports Pi's bootstrap directly and calls it with pizza's configuration.
 
-- **Config directory**: `~/.pizza/` (override with `PIZZA_DIR`)
-- **Shipped extensions**: loaded automatically via Pi's `-e` flag
-- **User extensions**: discovered from `~/.pizza/extensions/`
+**What pizza controls:**
+
+- `--version` and `--help` — pizza intercepts these and shows its own branding
+- Global config directory — `~/.pizza/` instead of `~/.pi/agent/` (override with `PIZZA_DIR`)
+- Shipped extensions — always loaded via Pi's `-e` flag
+- In-session UI — status bar, `/status` command, and any future extensions
+- User extensions — discovered from `~/.pizza/extensions/`
+
+**What Pi controls:**
+
+- Everything else: session management, TUI, tools, model selection, arg parsing
+- Project-local config still uses `.pi/` directories (Pi's namespace)
+- Runtime strings (tool descriptions, model names) come from Pi
+
+This is intentional. Pizza pushes Pi's extension system as far as it goes rather than reimplementing Pi's internals.
+
+### Integration boundary
+
+Pizza resolves Pi's internal `main.js` via `import.meta.resolve` — this path is not part of Pi's public exports. The `~` semver pin and an `existsSync` guard catch breakage from layout changes, but this is the most fragile point in the harness. If Pi ever exports `main()` publicly, pizza should switch to that.
+
+### File layout
 
 ```
 src/
 ├── cli.ts              # Entry point — sets process title, calls main()
-├── main.ts             # Resolves Pi's main(), injects shipped extensions
-├── config.ts           # 🍕 Pizza identity: version, paths, config dir
+├── main.ts             # Intercepts --version/--help, resolves Pi, injects extensions
+├── config.ts           # VERSION (from package.json), paths, config dir
 ├── index.ts            # Public API
 └── extensions/
     └── status.ts       # Shipped extension: status bar + /status command
 ```
-
-`cli.ts` sets `process.title = "pizza"` and points `PI_CODING_AGENT_DIR` to `~/.pizza`. `main.ts` resolves Pi's `main()` from the dependency, prepends shipped extensions as `-e` flags, and calls it. From there, Pi runs normally — session management, TUI, tools, model selection — all powered by Pi's core.
-
-Customization happens through Pi extensions. Each extension gets full access to Pi's `ExtensionAPI`: lifecycle events, tool registration, commands, shortcuts, UI components, system prompt modification, and more. See [Pi's extension docs](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/extensions.md).
 
 ## Development
 

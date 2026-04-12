@@ -1,7 +1,15 @@
-import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
-export const VERSION = "0.1.0";
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(
+  readFileSync(resolve(__dirname, "..", "package.json"), "utf-8"),
+);
+
+/** Derived from package.json — single source of truth. */
+export const VERSION: string = pkg.version;
 export const APP_NAME = "pizza";
 export const CONFIG_DIR = ".pizza";
 
