@@ -2,118 +2,79 @@
 
 Pi with toppings.
 
-Pizza is [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) with some additional features. It's fully Pi-compatible — same extensions, tools, models, and workflows — with a few extras on top.
+Pizza is [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) with toppings — a curated set of extensions, skills, and prompts that configure Pi into an opinionated coding agent.
 
-## Install
-
-```bash
-npm install -g pizza
-```
-
-Requires Node.js `>= 20.6.0`.
-
-## Usage
-
-```text
-pizza [options] [@files...] [messages...]
-```
-
-Run `pizza --help` for the full command list.
-
-On first run, authenticate with a provider:
-
-```text
-pizza
-# then use /login inside the session
-```
-
-### Examples
+## 📦 Install
 
 ```bash
-# Start an interactive session
-pizza
-
-# One-shot prompt (non-interactive)
-pizza -p "List all .ts files in src/"
-
-# Attach files as context
-pizza @prompt.md "Summarize this plan"
-
-# Pick a model
-pizza --model openai/gpt-4o "Help me refactor this code"
-
-# Cycle between models with thinking levels
-pizza --models sonnet:high,haiku:low
-
-# Restrict tools
-pizza --tools read,grep,find,ls -p "Review the code in src/"
-
-# Continue or resume a session
-pizza --continue "What did we discuss?"
-pizza --resume
+pi install npm:pizza-pi
 ```
 
-### Package Commands
+## 🧩 What's Included
 
-```bash
-pizza install <source> [-l]     # Install an extension
-pizza remove <source> [-l]      # Remove an extension
-pizza update [source]           # Update extensions
-pizza list                      # List installed extensions
-pizza config                    # Show configuration overview
-```
+| Extension | Description |
+|-----------|-------------|
+| 🍕 pizza-ui | Session banner, dynamic status line, `/pizza` command |
+| 🔁 [loop](https://github.com/mitsuhiko/agent-stuff) | Autonomous agent loops with breakout conditions (`/loop`) |
+| 📊 [context](https://github.com/mitsuhiko/agent-stuff) | Context window visualization and session token/cost tracking (`/context`) |
+| 📝 [todos](https://github.com/mitsuhiko/agent-stuff) | File-based task management with distributed locking (`/todos`) |
+| 📡 [control](https://github.com/mitsuhiko/agent-stuff) | Inter-session communication via Unix sockets (`--session-control`) |
+| 🤖 [subagents](https://github.com/HazAT/pi-interactive-subagents) | Spawn and orchestrate sub-agents in multiplexer panes (`/plan`, `/iterate`) |
 
-Pass `-l` to install or remove from project-local settings instead of global.
-
-## Configuration
-
-Pizza keeps its config under `~/.pizza/` (override with `PIZZA_DIR`):
-
-```text
-~/.pizza/
-├── extensions/       # Extensions
-├── prompts/          # Prompt templates
-├── skills/           # Skills
-├── themes/           # Themes
-├── auth.json         # Provider credentials
-└── models.json       # Model configuration
-```
-
-Project-local `.pizza/` directories layer on top of global config. Pi's `.pi/` project settings still apply.
-
-Run `pizza config` to see the full resolved configuration.
-
-## Development
+## 🛠️ Development
 
 ```bash
 npm install
-npm run build
 npm test
-
-# Run locally
-node dist/cli.js --help
-node dist/cli.js config
+npm run typecheck
 ```
 
-### File Layout
+### 🧪 Test an extension
 
-```text
-src/
-├── cli.ts                  # Binary entry point
-├── app.ts                  # Bootstrap flow
-├── args.ts                 # Argument parsing and help
-├── runtime.ts              # Runtime and service creation
-├── session-target.ts       # Session selection and fork/continue logic
-├── model-selection.ts      # Model resolution and scoped-model handling
-├── package-commands.ts     # install/remove/update/list/config commands
-├── files.ts                # @file and stdin prompt assembly
-├── diagnostics.ts          # Startup/runtime diagnostics
-├── config.ts               # Version and path model
-├── index.ts                # Public API
-└── extensions/
-    └── pizza-ui.ts         # /pizza and /status commands
+```bash
+pi -e ./extensions/pizza-ui.ts
 ```
 
-## License
+### 📋 Test the full package
+
+```bash
+pi install .
+```
+
+### ✏️ Write an extension
+
+Add a `.ts` file to `extensions/`. Add a matching test in `test/extensions/`.
+
+```typescript
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+
+export default function myExtension(pi: ExtensionAPI): void {
+  // ...
+}
+```
+### 🔗 Include a third-party extension
+
+Add it as a dependency and point the `pi` manifest at the package root so the loader resolves extensions from its own `pi` field:
+
+```json
+{
+  "dependencies": {
+    "some-pi-extension": "^1.0.0"
+  },
+  "pi": {
+    "extensions": ["extensions", "node_modules/some-pi-extension"]
+  }
+}
+```
+
+If the dependency isn't published on npm (e.g. installed from GitHub), add it to `bundledDependencies` so `npm pack` includes it in the tarball:
+
+```json
+{
+  "bundledDependencies": ["some-pi-extension"]
+}
+```
+
+## 📄 License
 
 Apache 2.0

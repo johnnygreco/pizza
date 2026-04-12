@@ -7,15 +7,12 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
     "moduleResolution": "Node16",
     "resolveJsonModule": true,
-    "outDir": "./dist",
-    "rootDir": "./src",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["extensions/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules"]
 }

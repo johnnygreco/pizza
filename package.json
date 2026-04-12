@@ -1,39 +1,51 @@
 {
-  "name": "pizza",
+  "name": "pizza-pi",
   "version": "0.1.0",
   "description": "\uD83C\uDF55 Pizza \u2014 Pi with toppings",
   "type": "module",
   "license": "Apache-2.0",
-  "bin": {
-    "pizza": "./dist/cli.js"
+  "keywords": ["pi-package"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/johnnygreco/pizza.git"
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "pi": {
+    "extensions": [
+      "extensions",
+      "node_modules/pi-interactive-subagents"
+    ],
+    "skills": ["skills"],
+    "prompts": ["prompts"]
   },
   "files": [
-    "dist"
+    "extensions",
+    "skills",
+    "prompts"
   ],
+  "bundledDependencies": ["pi-interactive-subagents"],
   "engines": {
     "node": ">=20.6.0"
   },
   "scripts": {
-    "dev": "tsc --watch",
-    "build": "tsc && chmod +x dist/cli.js",
-    "pretest": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "clean": "rm -rf dist",
-    "prepublishOnly": "npm run clean && npm run build && npm test"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "0.66.1"
+    "pi-interactive-subagents": "github:HazAT/pi-interactive-subagents#bf4fb961c14567c949e010dca5ec01590b08289a"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.60.0",
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
   },
   "devDependencies": {
+    "@mariozechner/pi-coding-agent": "0.66.1",
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
