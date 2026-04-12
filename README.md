@@ -2,7 +2,7 @@
 
 Pi with toppings.
 
-Pizza is [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) with toppings — a curated set of extensions, skills, and prompts that configure Pi into an opinionated coding agent.
+Pizza is [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) with toppings — a set of extensions that configure Pi into an opinionated coding agent.
 
 ## 📦 Install
 

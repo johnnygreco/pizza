@@ -21,8 +21,9 @@ endif
 		echo "Error: uncommitted changes detected. Commit or stash them first."; \
 		exit 1; \
 	fi
-	@# Run tests
+	@# Run tests and typecheck
 	npm test
+	npm run typecheck
 	@# Check if tag already exists
 	@TAG="v$(VERSION)"; \
 	if git rev-parse "$$TAG" >/dev/null 2>&1; then \

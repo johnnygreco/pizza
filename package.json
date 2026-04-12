@@ -31,6 +31,7 @@
     "node": ">=20.6.0"
   },
   "scripts": {
+    "prepack": "rm -rf node_modules/pi-interactive-subagents/test",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
@@ -39,10 +40,10 @@
     "pi-interactive-subagents": "github:HazAT/pi-interactive-subagents#bf4fb961c14567c949e010dca5ec01590b08289a"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": ">=0.60.0",
-    "@mariozechner/pi-ai": "*",
-    "@mariozechner/pi-tui": "*",
-    "@sinclair/typebox": "*"
+    "@mariozechner/pi-coding-agent": "~0.66.1",
+    "@mariozechner/pi-ai": "~0.66.1",
+    "@mariozechner/pi-tui": "~0.66.1",
+    "@sinclair/typebox": "~0.34.49"
   },
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "0.66.1",
