@@ -134,8 +134,9 @@ main() {
     TARBALL_URL="${PIZZA_TARBALL_URL:-https://github.com/${REPO}/releases/download/v${VERSION}/pizza-${VERSION}.tar.gz}"
     info "Downloading from ${TARBALL_URL}"
 
-    if ! curl -fsSL "$TARBALL_URL" | tar -xz -C "$TMP_DIR" 2>/dev/null; then
+    if ! curl -fsSL "$TARBALL_URL" 2>"$TMP_DIR/dl.log" | tar -xz -C "$TMP_DIR" 2>>"$TMP_DIR/dl.log"; then
         error "Failed to download Pizza v${VERSION}"
+        [ -s "$TMP_DIR/dl.log" ] && cat "$TMP_DIR/dl.log" >&2
         echo "  Check that the version exists: https://github.com/${REPO}/releases"
         exit 1
     fi
@@ -161,8 +162,9 @@ main() {
     info "Installing subagents extension"
     SUBAGENTS_URL="https://github.com/${SUBAGENTS_REPO}/archive/${SUBAGENTS_COMMIT}.tar.gz"
 
-    if ! curl -fsSL "$SUBAGENTS_URL" | tar -xz -C "$TMP_DIR" 2>/dev/null; then
+    if ! curl -fsSL "$SUBAGENTS_URL" 2>"$TMP_DIR/dl.log" | tar -xz -C "$TMP_DIR" 2>>"$TMP_DIR/dl.log"; then
         error "Failed to download subagents extension"
+        [ -s "$TMP_DIR/dl.log" ] && cat "$TMP_DIR/dl.log" >&2
         exit 1
     fi
 

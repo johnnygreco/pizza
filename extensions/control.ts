@@ -34,7 +34,7 @@
  *   - { type: "send", message: "...", mode?: "steer"|"follow_up" }
  *   - { type: "get_message" }
  *   - { type: "get_summary" }
- *   - { type: "clear", summarize?: boolean }
+ *   - { type: "clear" }
  *   - { type: "abort" }
  *   - { type: "subscribe", event: "turn_end" }
  *
@@ -112,7 +112,6 @@ interface RpcGetSummaryCommand {
 
 interface RpcClearCommand {
 	type: "clear";
-	summarize?: boolean;
 	id?: string;
 }
 
@@ -728,18 +727,13 @@ async function handleCommand(
 			return;
 		}
 
-		if (command.summarize) {
-			// Summarization requires navigateTree which we don't have direct access to
-			// Return an error for now - the caller should clear without summarize
-			// or use a different approach
-			respond(false, "clear", undefined, "Clear with summarization not supported via RPC - use summarize=false");
-			return;
-		}
-
-		// Access internal session manager to rewind (type assertion to access non-readonly methods)
 		try {
-			const sessionManager = ctx.sessionManager as unknown as { rewindTo(id: string): void };
-			sessionManager.rewindTo(firstEntryId);
+			const sessionManager = ctx.sessionManager as unknown as Record<string, unknown>;
+			if (typeof sessionManager.rewindTo !== "function") {
+				respond(false, "clear", undefined, "Session manager does not support rewindTo");
+				return;
+			}
+			(sessionManager.rewindTo as (id: string) => void)(firstEntryId);
 			respond(true, "clear", { cleared: true, targetId: firstEntryId });
 		} catch (error) {
 			respond(false, "clear", undefined, error instanceof Error ? error.message : "Clear failed");
@@ -815,17 +809,20 @@ async function createServer(pi: ExtensionAPI, state: SocketState, socketPath: st
 		});
 	});
 
-	// Wait for server to start listening, with error handling
-	await new Promise<void>((resolve, reject) => {
-		server.once("error", reject);
-		server.listen(socketPath, () => {
-			server.removeListener("error", reject);
-			resolve();
+	// Set umask so the socket file is created with owner-only permissions,
+	// avoiding a window where it's world-accessible before chmod.
+	const oldUmask = process.umask(0o177);
+	try {
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject);
+			server.listen(socketPath, () => {
+				server.removeListener("error", reject);
+				resolve();
+			});
 		});
-	});
-
-	// Restrict socket to owner only
-	await fs.chmod(socketPath, 0o600);
+	} finally {
+		process.umask(oldUmask);
+	}
 
 	return server;
 }
@@ -1286,7 +1283,7 @@ Messages automatically include sender session info for replies. When you want a 
 				}
 
 				if (action === "clear") {
-					const result = await sendRpcCommand(socketPath, { type: "clear", summarize: false }, { timeout: 10000 });
+					const result = await sendRpcCommand(socketPath, { type: "clear" }, { timeout: 10000 });
 					if (!result.response.success) {
 						return {
 							content: [{ type: "text", text: `Failed to clear: ${result.response.error ?? "unknown error"}` }],
