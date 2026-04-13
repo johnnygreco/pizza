@@ -49,7 +49,7 @@ export const SUPPORTED_PI_RANGE: string =
     pkg.devDependencies?.["@mariozechner/pi-coding-agent"] ??
       pkg.dependencies?.["@mariozechner/pi-coding-agent"],
   ) ??
-  "~0.66.0";
+  "~0.67.0";
 
 export function describePiRange(range: string): string {
   const tilde = range.trim().match(/^~\s*v?(\d+)\.(\d+)\.(\d+)$/);

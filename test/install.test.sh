@@ -57,7 +57,7 @@ M
   "version": "0.99.0",
   "pizza": {
     "compatibility": {
-      "pi": "~0.66.0"
+      "pi": "~0.67.0"
     }
   },
   "pi": {
@@ -66,7 +66,7 @@ M
     "prompts": ["prompts"]
   },
   "devDependencies": {
-    "@mariozechner/pi-coding-agent": "0.66.1"
+    "@mariozechner/pi-coding-agent": "0.67.0"
   }
 }
 PKG
@@ -240,7 +240,7 @@ test_no_pi_exits_with_error() {
 test_incompatible_pi_nontty_exits() {
     echo "Incompatible Pi (non-TTY) → hard error"
     create_env
-    mock_pi "0.67.0"
+    mock_pi "0.68.0"
 
     local out rc=0
     out="$(run_installer --version 0.99.0)" || rc=$?
@@ -273,14 +273,14 @@ test_incompatible_pi_no_npm_exits() {
 test_incompatible_pi_uses_dependency_fallback_when_metadata_missing() {
     echo "Incompatible Pi uses inferred range when metadata is missing"
     create_env
-    mock_pi "0.67.0"
+    mock_pi "0.66.5"
 
     cat > "$TEST_DIR/fixture/pizza-0.99.0/package.json" << 'PKG'
 {
   "name": "pizza",
   "version": "0.99.0",
   "devDependencies": {
-    "@mariozechner/pi-coding-agent": "0.66.1"
+    "@mariozechner/pi-coding-agent": "0.67.0"
   }
 }
 PKG
@@ -290,7 +290,7 @@ PKG
     out="$(run_installer --version 0.99.0)" || rc=$?
 
     assert_exits_nonzero "exits non-zero" "$rc"
-    assert_output_contains "shows inferred range" "$out" "requires 0.66.x"
+    assert_output_contains "shows inferred range" "$out" "requires 0.67.x"
     assert_dir_missing "nothing installed" "$TEST_DIR/target/extensions"
 
     destroy_env
@@ -303,7 +303,7 @@ PKG
 test_node_too_old_exits() {
     echo "Node.js < 20.6.0 → hard error"
     create_env
-    mock_pi "0.66.5"
+    mock_pi "0.67.1"
     mock_node_version "v20.0.0"
 
     local out rc=0
@@ -337,7 +337,7 @@ test_node_missing_exits() {
 test_successful_install() {
     echo "Happy path: compatible Pi → full install"
     create_env
-    mock_pi "0.66.5"
+    mock_pi "0.67.1"
 
     local out rc=0
     out="$(run_installer --version 0.99.0)" || rc=$?
@@ -372,7 +372,7 @@ test_successful_install() {
 test_package_json_generated() {
     echo "package.json has correct version and includes subagents"
     create_env
-    mock_pi "0.66.5"
+    mock_pi "0.67.1"
 
     run_installer --version 0.99.0 >/dev/null 2>&1 || true
 
@@ -380,7 +380,7 @@ test_package_json_generated() {
     assert_file_contains "version is 0.99.0" "$TEST_DIR/target/package.json" '"version": "0.99.0"'
     assert_file_contains "extensions field present" "$TEST_DIR/target/package.json" '"extensions"'
     assert_file_contains "subagents included" "$TEST_DIR/target/package.json" '"subagents"'
-    assert_file_contains "pi compatibility is preserved" "$TEST_DIR/target/package.json" '"pi": "~0.66.0"'
+    assert_file_contains "pi compatibility is preserved" "$TEST_DIR/target/package.json" '"pi": "~0.67.0"'
 
     destroy_env
 }
@@ -388,7 +388,7 @@ test_package_json_generated() {
 test_pi_install_called_with_correct_path() {
     echo "pi install is called with the install directory"
     create_env
-    mock_pi "0.66.5"
+    mock_pi "0.67.1"
 
     run_installer --version 0.99.0 >/dev/null 2>&1 || true
 
@@ -403,7 +403,7 @@ test_pi_install_called_with_correct_path() {
 test_reinstall_cleans_old_files() {
     echo "Reinstall replaces old extension files"
     create_env
-    mock_pi "0.66.5"
+    mock_pi "0.67.1"
 
     # First install
     run_installer --version 0.99.0 >/dev/null 2>&1 || true
@@ -445,7 +445,7 @@ test_reinstall_cleans_old_files() {
 test_agent_symlink_skips_user_files() {
     echo "Agent symlink skips existing non-Pizza files"
     create_env
-    mock_pi "0.66.5"
+    mock_pi "0.67.1"
 
     # Pre-create a user-owned agent with the same name
     mkdir -p "$TEST_DIR/home/.agents"
@@ -472,7 +472,7 @@ test_agent_symlink_skips_user_files() {
 test_version_v_prefix_stripped() {
     echo "--version v0.99.0 strips the v prefix"
     create_env
-    mock_pi "0.66.5"
+    mock_pi "0.67.1"
 
     local out rc=0
     out="$(run_installer --version v0.99.0)" || rc=$?
@@ -491,7 +491,7 @@ test_version_v_prefix_stripped() {
 test_bad_tarball_url_exits() {
     echo "Failed pizza tarball download → hard error"
     create_env
-    mock_pi "0.66.5"
+    mock_pi "0.67.1"
 
     local out rc=0
     out="$(run_installer PIZZA_TARBALL_URL="file:///nonexistent/pizza-0.99.0.tar.gz" -- --version 0.99.0)" || rc=$?
@@ -506,7 +506,7 @@ test_bad_tarball_url_exits() {
 test_corrupt_tarball_exits() {
     echo "Tarball missing extensions/ → hard error"
     create_env
-    mock_pi "0.66.5"
+    mock_pi "0.67.1"
 
     # Create a tarball without extensions/
     local bad="$TEST_DIR/bad_fixture/pizza-0.99.0"
@@ -526,7 +526,7 @@ test_corrupt_tarball_exits() {
 test_subagents_download_failure_exits() {
     echo "Failed subagents download → hard error"
     create_env
-    mock_pi "0.66.5"
+    mock_pi "0.67.1"
 
     # Override curl mock to fail on subagents URL
     cat > "$TEST_DIR/bin/curl" << MOCK
@@ -556,7 +556,7 @@ MOCK
 test_missing_version_value() {
     echo "Missing --version value → error with usage"
     create_env
-    mock_pi "0.66.5"
+    mock_pi "0.67.1"
 
     local out rc=0
     out="$(run_installer --version)" || rc=$?
@@ -604,7 +604,7 @@ test_help_flag() {
 test_uninstall_removes_directory() {
     echo "Uninstall removes install directory and deregisters"
     create_env
-    mock_pi "0.66.5"
+    mock_pi "0.67.1"
 
     # Install first
     run_installer --version 0.99.0 >/dev/null 2>&1 || true
@@ -629,7 +629,7 @@ test_uninstall_removes_directory() {
 test_uninstall_nonexistent() {
     echo "Uninstall with nothing to remove → clean exit"
     create_env
-    mock_pi "0.66.5"
+    mock_pi "0.67.1"
 
     local out rc=0
     out="$(run_installer --uninstall)" || rc=$?
@@ -647,7 +647,7 @@ test_uninstall_nonexistent() {
 test_git_fallback_excludes_prereleases() {
     echo "Version resolution: git fallback skips prerelease tags"
     create_env
-    mock_pi "0.66.5"
+    mock_pi "0.67.1"
 
     # Override curl: fail for GitHub API, pass through for tarballs
     cat > "$TEST_DIR/bin/curl" << MOCK

@@ -293,10 +293,10 @@ describe("pizza-ui extension", () => {
   it("warns when Pi is outside Pizza's supported range", () => {
     const ctx = createMockContext(true);
 
-    maybeWarnAboutPiCompatibility(ctx as any, "0.67.0");
+    maybeWarnAboutPiCompatibility(ctx as any, "0.66.5");
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("expects Pi 0.66.x"),
+      expect.stringContaining("expects Pi 0.67.x"),
       "warning",
     );
   });
@@ -304,7 +304,7 @@ describe("pizza-ui extension", () => {
   it("stays quiet when Pi is within Pizza's supported range", () => {
     const ctx = createMockContext(true);
 
-    maybeWarnAboutPiCompatibility(ctx as any, "0.66.5");
+    maybeWarnAboutPiCompatibility(ctx as any, "0.67.0");
 
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
@@ -323,7 +323,7 @@ describe("pizza-ui extension", () => {
     const msg = ctx.ui.notify.mock.calls[0][0] as string;
     expect(msg).toContain(VERSION);
     expect(msg).toContain("Pi:");
-    expect(msg).toContain("compatible with 0.66.x");
+    expect(msg).toContain("compatible with 0.67.x");
     expect(msg).toContain("sonnet");
     expect(msg).toContain("/home/user/project");
     expect(msg).toContain("15%");

@@ -6,7 +6,7 @@ main() {
     REPO="johnnygreco/pizza"
     SUBAGENTS_REPO="nicobailon/pi-subagents"
     SUBAGENTS_COMMIT="9d1e88b2d9e48bc59503814fd443850341f74907"
-    DEFAULT_PI_COMPATIBILITY_RANGE="~0.66.0"
+    DEFAULT_PI_COMPATIBILITY_RANGE="~0.67.0"
     DEFAULT_INSTALL_DIR="$HOME/.pizza"
 
     # ── Color helpers (tty-aware) ────────────────────────────────────────
