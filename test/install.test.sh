@@ -33,7 +33,10 @@ TEST_DIR=""
 create_env() {
     TEST_DIR="$(mktemp -d)"
 
-    # ── Mock bin directory ───────────────────���──────────────────────
+    # ── Isolated HOME so symlinks don't touch the real ~/.agents/ ──
+    mkdir -p "$TEST_DIR/home"
+
+    # ── Mock bin directory ────────────────────────────────────────────
     mkdir -p "$TEST_DIR/bin"
     ln -s "$REAL_NODE" "$TEST_DIR/bin/node"
     cat > "$TEST_DIR/bin/npm" << 'M'
@@ -44,10 +47,17 @@ M
 
     # ── Pizza tarball fixture (matches release artifact structure) ──
     local pkg="$TEST_DIR/fixture/pizza-0.99.0"
-    mkdir -p "$pkg/extensions" "$pkg/skills" "$pkg/prompts"
+    mkdir -p "$pkg/extensions" "$pkg/skills" "$pkg/prompts" "$pkg/agents"
     echo '{}' > "$pkg/extensions/stub.json"
     echo '{}' > "$pkg/skills/stub.json"
     echo '{}' > "$pkg/prompts/stub.json"
+    cat > "$pkg/agents/test-agent.md" << 'AGENT'
+---
+name: test-agent
+description: A test agent
+---
+You are a test agent.
+AGENT
     echo 'Apache 2.0' > "$pkg/LICENSE"
     tar -czf "$TEST_DIR/pizza.tar.gz" -C "$TEST_DIR/fixture" .
 
@@ -131,6 +141,7 @@ run_installer() {
 
     env \
         PATH="$TEST_DIR/bin:/usr/bin:/bin" \
+        HOME="$TEST_DIR/home" \
         PIZZA_HOME="$TEST_DIR/target" \
         PIZZA_TARBALL_URL="file://$TEST_DIR/pizza.tar.gz" \
         "${env_overrides[@]+"${env_overrides[@]}"}" \
@@ -290,8 +301,23 @@ test_successful_install() {
     assert_dir_exists "extensions/ installed" "$TEST_DIR/target/extensions"
     assert_dir_exists "skills/ installed" "$TEST_DIR/target/skills"
     assert_dir_exists "prompts/ installed" "$TEST_DIR/target/prompts"
+    assert_dir_exists "agents/ installed" "$TEST_DIR/target/agents"
     assert_dir_exists "subagents/ installed" "$TEST_DIR/target/subagents"
     assert_file_exists "LICENSE copied" "$TEST_DIR/target/LICENSE"
+
+    # Agent symlinks
+    if [ -L "$TEST_DIR/home/.agents/test-agent.md" ]; then
+        local link_target
+        link_target="$(readlink "$TEST_DIR/home/.agents/test-agent.md")"
+        if [ "$link_target" = "$TEST_DIR/target/agents/test-agent.md" ]; then
+            pass "agent symlink points to install dir"
+        else
+            fail "agent symlink target wrong" "expected $TEST_DIR/target/agents/test-agent.md, got $link_target"
+        fi
+    else
+        fail "agent symlink not created" "$TEST_DIR/home/.agents/test-agent.md"
+    fi
+
     assert_output_contains "shows success" "$out" "installed successfully"
     assert_output_contains "registered with Pi" "$out" "Registered with Pi"
 
@@ -347,6 +373,52 @@ test_reinstall_cleans_old_files() {
     else
         fail "stale file should be removed"
     fi
+
+    # Add a stale agent symlink that no longer corresponds to a shipped agent
+    ln -sf "$TEST_DIR/target/agents/old-agent.md" "$TEST_DIR/home/.agents/old-agent.md"
+
+    # Reinstall again
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+
+    if [ ! -L "$TEST_DIR/home/.agents/old-agent.md" ]; then
+        pass "stale agent symlink removed on reinstall"
+    else
+        fail "stale agent symlink should be removed"
+    fi
+
+    # Current agent symlink should still work
+    if [ -L "$TEST_DIR/home/.agents/test-agent.md" ]; then
+        pass "current agent symlink preserved on reinstall"
+    else
+        fail "current agent symlink should exist after reinstall"
+    fi
+
+    destroy_env
+}
+
+test_agent_symlink_skips_user_files() {
+    echo "Agent symlink skips existing non-Pizza files"
+    create_env
+    mock_pi "0.66.5"
+
+    # Pre-create a user-owned agent with the same name
+    mkdir -p "$TEST_DIR/home/.agents"
+    echo "my custom agent" > "$TEST_DIR/home/.agents/test-agent.md"
+
+    local out rc=0
+    out="$(run_installer --version 0.99.0)" || rc=$?
+
+    assert_exits_zero "exits zero" "$rc"
+
+    # User file should NOT be overwritten
+    if [ ! -L "$TEST_DIR/home/.agents/test-agent.md" ]; then
+        pass "user agent file not replaced by symlink"
+    else
+        fail "user agent file was replaced by a symlink"
+    fi
+
+    assert_file_contains "user file preserved" "$TEST_DIR/home/.agents/test-agent.md" "my custom agent"
+    assert_output_contains "warns about skip" "$out" "Skipping test-agent.md"
 
     destroy_env
 }
@@ -498,6 +570,13 @@ test_uninstall_removes_directory() {
     assert_dir_missing "install directory removed" "$TEST_DIR/target"
     assert_output_contains "deregistered" "$out" "Deregistered from Pi"
 
+    # Agent symlinks should be cleaned up
+    if [ -L "$TEST_DIR/home/.agents/test-agent.md" ]; then
+        fail "agent symlink should be removed after uninstall"
+    else
+        pass "agent symlink removed on uninstall"
+    fi
+
     destroy_env
 }
 
@@ -559,7 +638,7 @@ MOCK
 
     # Prepare a tarball matching the expected resolved version (0.2.0)
     local pkg="$TEST_DIR/versioned/pizza-0.2.0"
-    mkdir -p "$pkg/extensions" "$pkg/skills" "$pkg/prompts"
+    mkdir -p "$pkg/extensions" "$pkg/skills" "$pkg/prompts" "$pkg/agents"
     echo '{}' > "$pkg/extensions/stub.json"
     echo '{}' > "$pkg/skills/stub.json"
     echo '{}' > "$pkg/prompts/stub.json"
@@ -630,6 +709,8 @@ main() {
     test_pi_install_called_with_correct_path
     echo ""
     test_reinstall_cleans_old_files
+    echo ""
+    test_agent_symlink_skips_user_files
     echo ""
     test_version_v_prefix_stripped
 

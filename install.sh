@@ -150,10 +150,11 @@ main() {
     # ── Install core extensions ──────────────────────────────────────────
     mkdir -p "$INSTALL_DIR"
 
-    rm -rf "$INSTALL_DIR/extensions" "$INSTALL_DIR/skills" "$INSTALL_DIR/prompts"
+    rm -rf "$INSTALL_DIR/extensions" "$INSTALL_DIR/skills" "$INSTALL_DIR/prompts" "$INSTALL_DIR/agents"
     cp -R "$EXTRACTED/extensions" "$INSTALL_DIR/extensions"
     cp -R "$EXTRACTED/skills" "$INSTALL_DIR/skills"
     cp -R "$EXTRACTED/prompts" "$INSTALL_DIR/prompts"
+    [ -d "$EXTRACTED/agents" ] && cp -R "$EXTRACTED/agents" "$INSTALL_DIR/agents"
     [ -f "$EXTRACTED/LICENSE" ] && cp "$EXTRACTED/LICENSE" "$INSTALL_DIR/LICENSE"
 
     success "Core extensions installed"
@@ -171,6 +172,9 @@ main() {
     rm -rf "$INSTALL_DIR/subagents"
     cp -R "$TMP_DIR/pi-subagents-${SUBAGENTS_COMMIT}" "$INSTALL_DIR/subagents"
     success "Subagents extension installed"
+
+    # ── Symlink agent definitions into ~/.agents/ ────────────────────────
+    link_agents
 
     # ── Generate package.json ────────────────────────────────────────────
     generate_package_json "$VERSION"
@@ -191,13 +195,79 @@ main() {
     echo "    - context"
     echo "    - todos"
     echo "    - control"
-    echo "    - subagents (/plan, /iterate)"
+    echo "    - subagents (/agents, /run, /chain, /parallel)"
     echo ""
     echo "  Start a new Pi session to use Pizza."
     echo ""
 }
 
 # ── Helper functions ─────────────────────────────────────────────────────
+
+# Remove all symlinks in ~/.agents/ that point into the pizza install dir.
+unlink_agents() {
+    local agents_dir="$HOME/.agents"
+    [ -d "$agents_dir" ] || return 0
+
+    local count=0
+    for link in "$agents_dir"/*.md; do
+        [ -L "$link" ] || continue
+        local target
+        target="$(readlink "$link")"
+        case "$target" in
+            "$INSTALL_DIR/agents/"*) rm -f "$link"; count=$((count + 1)) ;;
+        esac
+    done
+
+    if [ "$count" -gt 0 ]; then
+        success "Removed $count agent symlink(s) from $agents_dir"
+    fi
+}
+
+# Symlink each .md file in $INSTALL_DIR/agents/ into ~/.agents/.
+link_agents() {
+    local agents_dir="$HOME/.agents"
+
+    # Clean stale symlinks from a previous install
+    unlink_agents
+
+    # Nothing to link if no .md files shipped
+    local has_agents=0
+    for f in "$INSTALL_DIR/agents/"*.md; do
+        [ -f "$f" ] && has_agents=1 && break
+    done
+    [ "$has_agents" -eq 0 ] && return 0
+
+    mkdir -p "$agents_dir"
+
+    local count=0
+    for f in "$INSTALL_DIR/agents/"*.md; do
+        [ -f "$f" ] || continue
+        local name dest
+        name="$(basename "$f")"
+        dest="$agents_dir/$name"
+
+        # Don't clobber files that aren't ours
+        if [ -e "$dest" ]; then
+            local is_ours=0
+            if [ -L "$dest" ]; then
+                case "$(readlink "$dest")" in
+                    "$INSTALL_DIR/agents/"*) is_ours=1 ;;
+                esac
+            fi
+            if [ "$is_ours" -eq 0 ]; then
+                warn "Skipping $name — $dest already exists (not managed by Pizza)"
+                continue
+            fi
+        fi
+
+        ln -sf "$f" "$dest"
+        count=$((count + 1))
+    done
+
+    if [ "$count" -gt 0 ]; then
+        success "$count agent definition(s) linked into $agents_dir"
+    fi
+}
 
 usage() {
     cat <<EOF
@@ -331,6 +401,9 @@ uninstall() {
         pi remove "$INSTALL_DIR" 2>/dev/null || true
         success "Deregistered from Pi"
     fi
+
+    # Remove agent symlinks before deleting the install dir (targets disappear)
+    unlink_agents
 
     if [ -d "$INSTALL_DIR" ]; then
         rm -rf "$INSTALL_DIR"

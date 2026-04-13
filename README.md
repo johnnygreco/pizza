@@ -41,13 +41,13 @@ pi --session-control
 pi --control-session mybot --send-session-message "status update?"
 ```
 
-**`/plan`** and **`/iterate`** — Spawn sub-agents in multiplexer panes.
+**`/agents`**, **`/run`**, **`/chain`**, **`/parallel`** — Subagent delegation with async support, chains, and parallel execution.
 
 **`/pizza`** — Version, model, and context at a glance.
 
 ### Credits
 
-`/loop`, `/context`, `/todos`, and `--session-control` are from [mitsuhiko/agent-stuff](https://github.com/mitsuhiko/agent-stuff). `/plan` and `/iterate` are from [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents).
+`/loop`, `/context`, `/todos`, and `--session-control` are from [mitsuhiko/agent-stuff](https://github.com/mitsuhiko/agent-stuff). Subagents are from [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents).
 
 ## 🛠️ Development
 
