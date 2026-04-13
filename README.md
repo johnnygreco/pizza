@@ -1,8 +1,6 @@
 # 🍕 Pizza
 
-**Pi with toppings.**
-
-Pizza is a set of extensions for [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) that turn it into a batteries-included coding agent. You get autonomous loops, context tracking, task management, multi-session control, and a nice status line — all out of the box.
+**Pi with toppings** — my opinionated [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) setup, packaged as a set of extensions.
 
 ## 📦 Install
 
@@ -10,11 +8,7 @@ Pizza is a set of extensions for [Pi](https://github.com/badlogic/pi-mono/tree/m
 curl -fsSL https://raw.githubusercontent.com/johnnygreco/pizza/main/install.sh | bash
 ```
 
-This checks for Node.js (>= 20.6) and Pi, then sets everything up at `~/.pizza`.
-
-Start a new Pi session and you're good to go.
-
-### Options
+Requires Node.js >= 20.6 and Pi. Installs to `~/.pizza`.
 
 ```bash
 # Pin a specific version
@@ -24,59 +18,36 @@ curl -fsSL .../install.sh | bash -s -- --version 0.2.0
 curl -fsSL .../install.sh | bash -s -- --uninstall
 ```
 
-Set `PIZZA_HOME` to change the install directory (default: `~/.pizza`).
+Set `PIZZA_HOME` to change the install directory.
 
-## 🧩 What You Get
+## 🧩 What's in the box
 
-### `/loop` — Autonomous agent loops
-
-Run the agent in a loop until a condition is met. Great for "keep going until the tests pass" workflows.
+**`/loop`** — Run the agent in a loop until a condition is met.
 
 ```
 /loop tests          # loop until tests pass
 /loop custom <cond>  # loop until your condition is met
 /loop self           # agent decides when it's done
-/loop                # interactive picker
 ```
 
-### `/context` — Context window dashboard
+**`/context`** — See context window usage, loaded skills, and session cost.
 
-See how much of the context window you're using, what's loaded, and how much the session has cost so far.
+**`/todos`** — File-based task management with distributed locking. Interactive TUI for creating, searching, and claiming tasks across sessions.
 
-```
-/context
-```
-
-Shows a visual breakdown: system prompt, tools, conversation, loaded skills, project context files, and a running token/cost total.
-
-### `/todos` — Task management
-
-File-based todo lists stored in `~/.pi/todos/`. Supports distributed locking so multiple sessions can safely share tasks.
-
-```
-/todos
-```
-
-Opens an interactive TUI — create, search, claim, close, and delete tasks. The agent can also use the `todos` tool directly to manage tasks programmatically.
-
-### `/pizza` — Session info
-
-Quick look at the current Pizza version, model, and context usage.
-
-### `--session-control` — Multi-session communication
-
-Start Pi with `--session-control` to enable inter-session messaging via Unix sockets. Sessions can send messages to each other, get summaries, or subscribe to events.
+**`--session-control`** — Inter-session messaging via Unix sockets.
 
 ```bash
-pi --session-control                              # enable for this session
-pi --control-session mybot --send-session-message "status update?"  # message another session
+pi --session-control
+pi --control-session mybot --send-session-message "status update?"
 ```
 
-The agent also gets a `send_to_session` tool for programmatic cross-session communication.
+**`/plan`** and **`/iterate`** — Spawn sub-agents in multiplexer panes.
 
-### `/plan` and `/iterate` — Subagents
+**`/pizza`** — Version, model, and context at a glance.
 
-Spawn and orchestrate sub-agents in multiplexer panes. Plan complex tasks across multiple agents, then iterate on the results.
+### Credits
+
+`/loop`, `/context`, `/todos`, and `--session-control` are from [mitsuhiko/agent-stuff](https://github.com/mitsuhiko/agent-stuff). `/plan` and `/iterate` are from [HazAT/pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents).
 
 ## 🛠️ Development
 
@@ -86,37 +57,25 @@ npm test
 npm run typecheck
 ```
 
-### Test a single extension
+Test a single extension:
 
 ```bash
 pi -e ./extensions/pizza-ui.ts
 ```
 
-### Test the full package locally
+Test the full package locally:
 
 ```bash
 pi install .
 ```
 
-### Write an extension
-
-Add a `.ts` file to `extensions/` and a matching test in `test/extensions/`.
-
-```typescript
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-
-export default function myExtension(pi: ExtensionAPI): void {
-  // ...
-}
-```
+See the [Pi extension docs](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#extensions) for writing your own extensions.
 
 ### Release
 
 ```bash
 make release VERSION=0.2.0
 ```
-
-Bumps version, commits, tags, and pushes. CI creates the GitHub release.
 
 ## 📄 License
 
