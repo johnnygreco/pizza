@@ -29,7 +29,13 @@ function createMockApi() {
 
 function createMockContext(
   hasUI = true,
-  options: { cwd?: string; model?: { id: string; name: string }; percent?: number | null } = {},
+  options: {
+    cwd?: string;
+    model?: { id: string; name: string };
+    percent?: number | null;
+    sessionName?: string;
+    entries?: any[];
+  } = {},
 ) {
   return {
     hasUI,
@@ -40,13 +46,30 @@ function createMockContext(
         ? { tokens: 1000, contextWindow: 200000, percent: options.percent }
         : undefined,
     ),
+    sessionManager: {
+      getEntries: vi.fn(() => options.entries ?? []),
+      getSessionName: vi.fn(() => options.sessionName),
+    },
     ui: {
       setTitle: vi.fn(),
       setStatus: vi.fn(),
       setWidget: vi.fn(),
+      setHeader: vi.fn(),
       notify: vi.fn(),
     },
   };
+}
+
+/** Call the setHeader factory and render the component at a given width. */
+function renderHeader(ctx: ReturnType<typeof createMockContext>, width = 120): string {
+  const factory = ctx.ui.setHeader.mock.calls[0][0] as Function;
+  const component = factory(null, null);
+  const lines: string[] = component.render(width);
+  return lines.join("\n");
+}
+
+function stripAnsi(s: string): string {
+  return s.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
 describe("pizza-ui extension", () => {
@@ -58,38 +81,36 @@ describe("pizza-ui extension", () => {
     expect(registeredCommands.has("pizza")).toBe(true);
   });
 
-  it("sets title and banner widget on session_start", async () => {
+  it("sets title and header on session_start", async () => {
     const { api, registeredEvents } = createMockApi();
     pizzaUiExtension(api as any);
 
     const ctx = createMockContext(true, { cwd: "/home/user/my-repo" });
-    await registeredEvents.get("session_start")![0]({}, ctx);
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
 
     expect(ctx.ui.setTitle).toHaveBeenCalledWith("pizza \u00B7 my-repo");
-    expect(ctx.ui.setWidget).toHaveBeenCalledWith(
-      "pizza.banner",
-      expect.any(Array),
-      { placement: "aboveEditor" },
-    );
-    expect(ctx.ui.setStatus).not.toHaveBeenCalled();
+    expect(ctx.ui.setHeader).toHaveBeenCalledWith(expect.any(Function));
   });
 
-  it("banner contains colored Pi and zza block text", async () => {
+  it("banner contains neon PIZZA letters and border", async () => {
     const { api, registeredEvents } = createMockApi();
     pizzaUiExtension(api as any);
 
     const ctx = createMockContext(true);
-    await registeredEvents.get("session_start")![0]({}, ctx);
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
 
-    const banner = ctx.ui.setWidget.mock.calls[0][1] as string[];
-    const joined = banner.join("\n");
-    // Pi block letter pattern (top line)
-    expect(joined).toContain("██████  ██");
-    // zza block letter pattern (bottom line)
-    expect(joined).toContain("███████ ███████ ██   ██");
+    const output = renderHeader(ctx);
+    // box-drawing PIZZA letter patterns
+    expect(output).toContain("╔═══╗");
+    expect(output).toContain("╠═══╝");
+    expect(output).toContain("╚═════╝");
+    expect(output).toContain("╠═══╣");
+    // rounded border corners
+    expect(output).toContain("╭");
+    expect(output).toContain("╰");
     // tagline
-    expect(joined).toContain("Pi ");
-    expect(joined).toContain("with toppings");
+    expect(output).toContain("Pi ");
+    expect(output).toContain("with toppings");
   });
 
   it("banner contains pizza art with toppings and cheese drips", async () => {
@@ -97,31 +118,159 @@ describe("pizza-ui extension", () => {
     pizzaUiExtension(api as any);
 
     const ctx = createMockContext(true);
-    await registeredEvents.get("session_start")![0]({}, ctx);
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
 
-    const banner = ctx.ui.setWidget.mock.calls[0][1] as string[];
-    const joined = banner.join("\n");
-    // pepperoni
-    expect(joined).toContain("●");
-    // green peppers
-    expect(joined).toContain("▬");
-    // sauce-cheese body
-    expect(joined).toContain("░");
-    // crust
-    expect(joined).toContain("████████████");
-    // cheese drips
-    expect(joined).toContain("╽");
+    const output = renderHeader(ctx);
+    expect(output).toContain("●");
+    expect(output).toContain("▬");
+    expect(output).toContain("░");
+    expect(output).toContain("████████████");
+    expect(output).toContain("╽");
   });
 
-  it("banner fits within the 10-line widget limit", async () => {
+  it("banner contains keyboard shortcuts and commands", async () => {
     const { api, registeredEvents } = createMockApi();
     pizzaUiExtension(api as any);
 
     const ctx = createMockContext(true);
-    await registeredEvents.get("session_start")![0]({}, ctx);
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
 
-    const banner = ctx.ui.setWidget.mock.calls[0][1] as string[];
-    expect(banner.length).toBeLessThanOrEqual(10);
+    const output = renderHeader(ctx);
+    expect(output).toContain("interrupt");
+    expect(output).toContain("suspend");
+    expect(output).toContain("cycle thinking");
+    expect(output).toContain("cycle models");
+    expect(output).toContain("expand tools");
+    expect(output).toContain("commands");
+    expect(output).toContain("bash");
+  });
+
+  it("banner contains version info", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true);
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+
+    const output = renderHeader(ctx);
+    expect(output).toContain(`v${VERSION}`);
+    expect(output).toContain("pizza");
+  });
+
+  it("banner has padding and session meta rows", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true);
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+
+    const output = renderHeader(ctx, 120);
+    const lines = output.split("\n");
+    // top border + padding + 10 content + padding + session meta + bottom border = 15
+    expect(lines.length).toBe(15);
+
+    // Second line (after top border) should be empty padding (only borders + spaces)
+    const paddingLine = stripAnsi(lines[1]);
+    const paddingContent = paddingLine.slice(2, -2);
+    expect(paddingContent.trim()).toBe("");
+  });
+
+  it("shows 'New session' for fresh startup", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true);
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+
+    const output = renderHeader(ctx);
+    expect(output).toContain("New session");
+    expect(output).toContain("sonnet");
+  });
+
+  it("shows 'Resumed' with session metadata for resumed session", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const entries = [
+      {
+        type: "message",
+        id: "1",
+        parentId: null,
+        timestamp: new Date(Date.now() - 3600000).toISOString(),
+        message: { role: "user", content: "Fix the login bug" },
+      },
+      {
+        type: "message",
+        id: "2",
+        parentId: "1",
+        timestamp: new Date(Date.now() - 3500000).toISOString(),
+        message: { role: "assistant", content: "I'll fix that." },
+      },
+    ];
+    const ctx = createMockContext(true, {
+      entries,
+      sessionName: "auth-fix",
+    });
+    await registeredEvents.get("session_start")![0]({ reason: "resume" }, ctx);
+
+    const output = renderHeader(ctx);
+    expect(output).toContain("Resumed");
+    expect(output).toContain('"auth-fix"');
+    expect(output).toContain("2 msgs");
+    expect(output).toContain("sonnet");
+  });
+
+  it("shows topic from first user message when no session name", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const entries = [
+      {
+        type: "message",
+        id: "1",
+        parentId: null,
+        timestamp: new Date(Date.now() - 60000).toISOString(),
+        message: { role: "user", content: "Refactor the database layer" },
+      },
+    ];
+    const ctx = createMockContext(true, { entries });
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+
+    const output = renderHeader(ctx);
+    expect(output).toContain("Resumed");
+    expect(output).toContain('"Refactor the database layer"');
+  });
+
+  it("header component caches render output", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true);
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+
+    const factory = ctx.ui.setHeader.mock.calls[0][0] as Function;
+    const component = factory(null, null);
+    const first = component.render(120);
+    const second = component.render(120);
+    expect(first).toBe(second);
+    const third = component.render(80);
+    expect(third).not.toBe(first);
+  });
+
+  it("falls back to stacked layout for narrow terminals", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true);
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+
+    const output = renderHeader(ctx, 70);
+    const lines = output.split("\n");
+    // stacked: top + padding + 10 left + separator + 10 right + padding + meta + bottom = 26
+    expect(lines.length).toBe(26);
+    expect(output).toContain("●");
+    expect(output).toContain("interrupt");
+    expect(output).toContain("New session");
   });
 
   it("skips UI setup when no UI", async () => {
@@ -129,9 +278,10 @@ describe("pizza-ui extension", () => {
     pizzaUiExtension(api as any);
 
     const ctx = createMockContext(false);
-    await registeredEvents.get("session_start")![0]({}, ctx);
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
 
     expect(ctx.ui.setTitle).not.toHaveBeenCalled();
+    expect(ctx.ui.setHeader).not.toHaveBeenCalled();
   });
 
   it("/pizza shows version, model, cwd, and context", async () => {
