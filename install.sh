@@ -34,7 +34,13 @@ main() {
     while [ $# -gt 0 ]; do
         case "$1" in
             --with)
+                option="$1"
                 shift
+                if [ $# -eq 0 ]; then
+                    error "Option $option requires a value"
+                    usage
+                    exit 1
+                fi
                 if [ "${1:-}" = "subagents" ]; then
                     INSTALL_SUBAGENTS=1
                 else
@@ -44,7 +50,13 @@ main() {
                 fi
                 ;;
             --version|-v)
+                option="$1"
                 shift
+                if [ $# -eq 0 ]; then
+                    error "Option $option requires a value"
+                    usage
+                    exit 1
+                fi
                 PINNED_VERSION="${1#v}"
                 ;;
             --uninstall)
@@ -110,7 +122,12 @@ main() {
 
     NODE_VERSION="$(node --version | sed 's/^v//')"
     NODE_MAJOR="$(echo "$NODE_VERSION" | cut -d. -f1)"
-    if [ "$NODE_MAJOR" -lt 20 ]; then
+    NODE_MINOR="$(echo "$NODE_VERSION" | cut -d. -f2)"
+    if ! [[ "$NODE_MAJOR" =~ ^[0-9]+$ ]] || ! [[ "$NODE_MINOR" =~ ^[0-9]+$ ]]; then
+        error "Could not parse Node.js version: v$NODE_VERSION"
+        exit 1
+    fi
+    if [ "$NODE_MAJOR" -lt 20 ] || { [ "$NODE_MAJOR" -eq 20 ] && [ "$NODE_MINOR" -lt 6 ]; }; then
         error "Node.js >= 20.6.0 required (found v$NODE_VERSION)"
         exit 1
     fi
@@ -269,6 +286,18 @@ check_pi() {
             success "Pi v$PI_VERSION"
         else
             warn "Pi v$PI_VERSION found, but Pizza requires ~$REQUIRED_PI_MAJOR_MINOR.x"
+            if ! command -v npm &>/dev/null; then
+                if [ -t 0 ]; then
+                    warn "npm not found, so Pi cannot be updated automatically"
+                    warn "Continuing with Pi v$PI_VERSION (may have compatibility issues)"
+                else
+                    error "Pi v$PI_VERSION is not compatible (requires ~$REQUIRED_PI_MAJOR_MINOR.x)"
+                    echo "  Install npm, then run manually to update:"
+                    echo "    npm install -g @mariozechner/pi-coding-agent@~${REQUIRED_PI_MAJOR_MINOR}.0"
+                    exit 1
+                fi
+                return
+            fi
             if [ -t 0 ]; then
                 printf "  Update Pi? [Y/n] "
                 read -r answer </dev/tty
@@ -293,9 +322,12 @@ check_pi() {
         info "Pi is not installed"
 
         if ! command -v npm &>/dev/null; then
-            error "npm is required to install Pi"
-            echo "  npm is usually installed alongside Node.js"
-            exit 1
+            warn "npm not found, so Pi cannot be installed automatically"
+            warn "Pizza will be downloaded but not registered."
+            echo "  Install npm, then run manually:"
+            echo "    npm install -g @mariozechner/pi-coding-agent@~${REQUIRED_PI_MAJOR_MINOR}.0"
+            echo "    pi install \${PIZZA_HOME:-$DEFAULT_INSTALL_DIR}"
+            return
         fi
 
         if [ -t 0 ]; then

@@ -42,6 +42,7 @@ Set `PIZZA_HOME` to change the install directory (default: `~/.pizza`).
 
 ```bash
 npm install
+make setup        # optional: clone subagents for local /plan,/iterate testing
 npm test
 npm run typecheck
 ```

@@ -148,6 +148,109 @@ test_nontty_no_pi_skips_registration() {
     fi
 }
 
+test_nontty_no_pi_no_npm_still_downloads() {
+    echo "Non-TTY with no Pi and no npm"
+    reset_target
+    remove_mock pi
+    remove_mock npm
+
+    local out rc=0
+    out="$(run_installer --version 0.99.0)" || rc=$?
+
+    if [ "$rc" -eq 0 ]; then
+        pass "exits successfully"
+    else
+        fail "should succeed" "got exit $rc"
+    fi
+
+    if echo "$out" | grep -q "npm not found"; then
+        pass "warns npm is missing"
+    else
+        fail "should warn npm is missing"
+    fi
+
+    if [ -d "$WORK_DIR/target/extensions" ]; then
+        pass "extensions installed"
+    else
+        fail "extensions should be installed"
+    fi
+
+    if echo "$out" | grep -q "pi install"; then
+        pass "shows manual registration command"
+    else
+        fail "should show manual registration command"
+    fi
+}
+
+test_node_version_floor() {
+    echo "Node.js version gate enforces >= 20.6.0"
+    reset_target
+    remove_mock pi
+
+    local real_node="$WORK_DIR/bin/node.real"
+    mv "$WORK_DIR/bin/node" "$real_node"
+
+    cat > "$WORK_DIR/bin/node" << 'MOCK'
+#!/usr/bin/env bash
+if [ "${1:-}" = "--version" ]; then
+    echo "v20.0.0"
+    exit 0
+fi
+exec "$(dirname "$0")/node.real" "$@"
+MOCK
+    chmod +x "$WORK_DIR/bin/node"
+
+    local out rc=0
+    out="$(run_installer --version 0.99.0)" || rc=$?
+
+    mv "$real_node" "$WORK_DIR/bin/node"
+
+    if [ "$rc" -ne 0 ]; then
+        pass "exits non-zero"
+    else
+        fail "should exit non-zero" "got $rc"
+    fi
+
+    if echo "$out" | grep -q "Node.js >= 20.6.0 required"; then
+        pass "prints version floor error"
+    else
+        fail "should print version floor error"
+    fi
+
+    if [ ! -d "$WORK_DIR/target/extensions" ]; then
+        pass "does not install anything"
+    else
+        fail "should not have installed extensions"
+    fi
+}
+
+test_missing_version_value() {
+    echo "Missing --version value returns a usage error"
+    reset_target
+    mock_pi "0.66.5"
+
+    local out rc=0
+    out="$(run_installer --version)" || rc=$?
+
+    if [ "$rc" -ne 0 ]; then
+        pass "exits non-zero"
+    else
+        fail "should exit non-zero" "got $rc"
+    fi
+
+    if echo "$out" | grep -q "Option --version requires a value"; then
+        pass "prints a helpful error"
+    else
+        fail "should print a helpful error"
+    fi
+
+    if echo "$out" | grep -q "Usage:"; then
+        pass "shows usage"
+    else
+        fail "should show usage"
+    fi
+}
+
 test_stale_subagents_removed() {
     echo "Stale subagents removed on reinstall without --with subagents"
     reset_target
@@ -329,6 +432,12 @@ main() {
     test_nontty_incompatible_pi_exits
     echo ""
     test_nontty_no_pi_skips_registration
+    echo ""
+    test_nontty_no_pi_no_npm_still_downloads
+    echo ""
+    test_node_version_floor
+    echo ""
+    test_missing_version_value
     echo ""
     test_stale_subagents_removed
     echo ""

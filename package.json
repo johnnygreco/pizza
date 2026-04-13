@@ -10,7 +10,8 @@
   },
   "pi": {
     "extensions": [
-      "extensions"
+      "extensions",
+      "subagents"
     ],
     "skills": [
       "skills"
