@@ -50,18 +50,15 @@ function createMockContext(
 }
 
 describe("pizza-ui extension", () => {
-  it("registers session_start, turn_start, model_select, turn_end, and /pizza", () => {
+  it("registers session_start and /pizza", () => {
     const { api, registeredEvents, registeredCommands } = createMockApi();
     pizzaUiExtension(api as any);
 
     expect(registeredEvents.has("session_start")).toBe(true);
-    expect(registeredEvents.has("turn_start")).toBe(true);
-    expect(registeredEvents.has("model_select")).toBe(true);
-    expect(registeredEvents.has("turn_end")).toBe(true);
     expect(registeredCommands.has("pizza")).toBe(true);
   });
 
-  it("sets title with repo name on session_start", async () => {
+  it("sets title and banner widget on session_start", async () => {
     const { api, registeredEvents } = createMockApi();
     pizzaUiExtension(api as any);
 
@@ -69,11 +66,62 @@ describe("pizza-ui extension", () => {
     await registeredEvents.get("session_start")![0]({}, ctx);
 
     expect(ctx.ui.setTitle).toHaveBeenCalledWith("pizza \u00B7 my-repo");
-    expect(ctx.ui.setStatus).toHaveBeenCalledWith(
-      "pizza",
-      expect.stringContaining(VERSION),
+    expect(ctx.ui.setWidget).toHaveBeenCalledWith(
+      "pizza.banner",
+      expect.any(Array),
+      { placement: "aboveEditor" },
     );
-    expect(ctx.ui.setWidget).toHaveBeenCalled();
+    expect(ctx.ui.setStatus).not.toHaveBeenCalled();
+  });
+
+  it("banner contains colored Pi and zza block text", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true);
+    await registeredEvents.get("session_start")![0]({}, ctx);
+
+    const banner = ctx.ui.setWidget.mock.calls[0][1] as string[];
+    const joined = banner.join("\n");
+    // Pi block letter pattern (top line)
+    expect(joined).toContain("██████  ██");
+    // zza block letter pattern (bottom line)
+    expect(joined).toContain("███████ ███████ ██   ██");
+    // tagline
+    expect(joined).toContain("Pi ");
+    expect(joined).toContain("with toppings");
+  });
+
+  it("banner contains pizza art with toppings and cheese drips", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true);
+    await registeredEvents.get("session_start")![0]({}, ctx);
+
+    const banner = ctx.ui.setWidget.mock.calls[0][1] as string[];
+    const joined = banner.join("\n");
+    // pepperoni
+    expect(joined).toContain("●");
+    // green peppers
+    expect(joined).toContain("▬");
+    // sauce-cheese body
+    expect(joined).toContain("░");
+    // crust
+    expect(joined).toContain("████████████");
+    // cheese drips
+    expect(joined).toContain("╽");
+  });
+
+  it("banner fits within the 10-line widget limit", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true);
+    await registeredEvents.get("session_start")![0]({}, ctx);
+
+    const banner = ctx.ui.setWidget.mock.calls[0][1] as string[];
+    expect(banner.length).toBeLessThanOrEqual(10);
   });
 
   it("skips UI setup when no UI", async () => {
@@ -84,78 +132,6 @@ describe("pizza-ui extension", () => {
     await registeredEvents.get("session_start")![0]({}, ctx);
 
     expect(ctx.ui.setTitle).not.toHaveBeenCalled();
-  });
-
-  it("turn_start skips when no UI", async () => {
-    const { api, registeredEvents } = createMockApi();
-    pizzaUiExtension(api as any);
-
-    const ctx = createMockContext(false);
-    await registeredEvents.get("turn_start")![0]({}, ctx);
-
-    expect(ctx.ui.setStatus).not.toHaveBeenCalled();
-  });
-
-  it("shows model and ellipsis on turn_start", async () => {
-    const { api, registeredEvents } = createMockApi();
-    pizzaUiExtension(api as any);
-
-    const ctx = createMockContext(true, {
-      model: { id: "claude-sonnet-4-20250514", name: "sonnet" },
-    });
-    await registeredEvents.get("turn_start")![0]({}, ctx);
-
-    const statusCall = ctx.ui.setStatus.mock.calls[0];
-    expect(statusCall[1]).toContain("sonnet");
-    expect(statusCall[1]).toContain("...");
-  });
-
-  it("model_select skips when no UI", async () => {
-    const { api, registeredEvents } = createMockApi();
-    pizzaUiExtension(api as any);
-
-    const ctx = createMockContext(false);
-    await registeredEvents.get("model_select")![0]({ model: { id: "x", name: "x" } }, ctx);
-
-    expect(ctx.ui.setStatus).not.toHaveBeenCalled();
-  });
-
-  it("updates status on model_select", async () => {
-    const { api, registeredEvents } = createMockApi();
-    pizzaUiExtension(api as any);
-
-    const ctx = createMockContext(true);
-    const event = { model: { id: "claude-haiku-4-5-20251001", name: "haiku" } };
-    await registeredEvents.get("model_select")![0](event, ctx);
-
-    const statusCall = ctx.ui.setStatus.mock.calls[0];
-    expect(statusCall[1]).toContain("haiku");
-  });
-
-  it("updates status with model and context on turn_end", async () => {
-    const { api, registeredEvents } = createMockApi();
-    pizzaUiExtension(api as any);
-
-    const ctx = createMockContext(true, {
-      model: { id: "claude-sonnet-4-20250514", name: "sonnet" },
-      percent: 42,
-    });
-    await registeredEvents.get("turn_end")![0]({}, ctx);
-
-    const statusCall = ctx.ui.setStatus.mock.calls[0];
-    expect(statusCall[0]).toBe("pizza");
-    expect(statusCall[1]).toContain("sonnet");
-    expect(statusCall[1]).toContain("ctx 42%");
-  });
-
-  it("turn_end skips when no UI", async () => {
-    const { api, registeredEvents } = createMockApi();
-    pizzaUiExtension(api as any);
-
-    const ctx = createMockContext(false);
-    await registeredEvents.get("turn_end")![0]({}, ctx);
-
-    expect(ctx.ui.setStatus).not.toHaveBeenCalled();
   });
 
   it("/pizza shows version, model, cwd, and context", async () => {
