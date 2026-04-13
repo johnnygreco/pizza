@@ -19,336 +19,529 @@ fail() {
     [ -n "${2:-}" ] && printf "    %s\n" "$2"
 }
 
-# ── Fixtures ────────────────────────────────────────────────────────────
-WORK_DIR=""
+# ── Per-test isolation ──────────────────────────────────────────────────
+# Each test gets its own temp directory with its own bin/, fixtures, and
+# install target. Nothing is shared between tests.
+
 REAL_CURL="$(command -v curl)"
+REAL_NODE="$(command -v node)"
+SUBAGENTS_COMMIT="$(grep 'SUBAGENTS_COMMIT=' "$INSTALL_SCRIPT" | head -1 | sed 's/.*"\(.*\)"/\1/')"
+TEST_DIR=""
 
-setup() {
-    WORK_DIR="$(mktemp -d)"
+# Create an isolated environment for a single test. Sets TEST_DIR and
+# populates it with mock binaries and tarball fixtures.
+create_env() {
+    TEST_DIR="$(mktemp -d)"
 
-    # Pizza tarball fixture
-    local pkg="$WORK_DIR/fixture/pizza-0.99.0"
+    # ── Mock bin directory ───────────────────���──────────────────────
+    mkdir -p "$TEST_DIR/bin"
+    ln -s "$REAL_NODE" "$TEST_DIR/bin/node"
+    cat > "$TEST_DIR/bin/npm" << 'M'
+#!/usr/bin/env bash
+exit 0
+M
+    chmod +x "$TEST_DIR/bin/npm"
+
+    # ── Pizza tarball fixture (matches release artifact structure) ──
+    local pkg="$TEST_DIR/fixture/pizza-0.99.0"
     mkdir -p "$pkg/extensions" "$pkg/skills" "$pkg/prompts"
     echo '{}' > "$pkg/extensions/stub.json"
     echo '{}' > "$pkg/skills/stub.json"
     echo '{}' > "$pkg/prompts/stub.json"
-    tar -czf "$WORK_DIR/pizza.tar.gz" -C "$WORK_DIR/fixture" .
+    echo 'Apache 2.0' > "$pkg/LICENSE"
+    tar -czf "$TEST_DIR/pizza.tar.gz" -C "$TEST_DIR/fixture" .
 
-    # Subagents tarball fixture (matches SUBAGENTS_COMMIT in install.sh)
-    local sa="$WORK_DIR/sa_fixture/pi-interactive-subagents-bf4fb961c14567c949e010dca5ec01590b08289a"
+    # ── Subagents tarball fixture ─────────────────────────────────���─
+    local sa="$TEST_DIR/sa_fixture/pi-interactive-subagents-${SUBAGENTS_COMMIT}"
     mkdir -p "$sa"
     echo '{}' > "$sa/package.json"
-    tar -czf "$WORK_DIR/subagents.tar.gz" -C "$WORK_DIR/sa_fixture" .
+    tar -czf "$TEST_DIR/subagents.tar.gz" -C "$TEST_DIR/sa_fixture" .
 
-    # Mock bin directory — real node, no-op npm
-    mkdir -p "$WORK_DIR/bin"
-    ln -s "$(command -v node)" "$WORK_DIR/bin/node"
-    cat > "$WORK_DIR/bin/npm" << 'M'
-#!/usr/bin/env bash
-exit 0
-M
-    chmod +x "$WORK_DIR/bin/npm"
-}
-
-teardown() {
-    [ -n "$WORK_DIR" ] && rm -rf "$WORK_DIR"
-}
-
-# Helpers ────────────────────────────────────────────────────────────────
-
-mock_pi() {
-    cat > "$WORK_DIR/bin/pi" << MOCK
-#!/usr/bin/env bash
-case "\$1" in
-    --version) echo "$1" ;;
-    *) exit 0 ;;
-esac
-MOCK
-    chmod +x "$WORK_DIR/bin/pi"
-}
-
-remove_mock() { rm -f "$WORK_DIR/bin/$1"; }
-
-reset_target() { rm -rf "$WORK_DIR/target"; }
-
-# Run install.sh with stdin from /dev/null (non-TTY) and controlled env.
-run_installer() {
-    env \
-        PATH="$WORK_DIR/bin:/usr/bin:/bin" \
-        PIZZA_HOME="$WORK_DIR/target" \
-        PIZZA_TARBALL_URL="file://$WORK_DIR/pizza.tar.gz" \
-        bash "$INSTALL_SCRIPT" "$@" </dev/null 2>&1
-}
-
-# ── Test cases ──────────────────────────────────────────────────────────
-
-test_nontty_incompatible_pi_exits() {
-    echo "Non-TTY with incompatible Pi"
-    reset_target
-    mock_pi "0.67.0"
-
-    local out rc=0
-    out="$(run_installer --version 0.99.0)" || rc=$?
-
-    if [ "$rc" -ne 0 ]; then
-        pass "exits non-zero"
-    else
-        fail "should exit non-zero" "got $rc"
-    fi
-
-    if echo "$out" | grep -q "not compatible"; then
-        pass "prints incompatibility error"
-    else
-        fail "should print incompatibility error"
-    fi
-
-    if echo "$out" | grep -q "npm install -g"; then
-        pass "shows manual update command"
-    else
-        fail "should show manual update command"
-    fi
-
-    if [ ! -d "$WORK_DIR/target/extensions" ]; then
-        pass "does not install anything"
-    else
-        fail "should not have installed extensions"
-    fi
-}
-
-test_nontty_no_pi_skips_registration() {
-    echo "Non-TTY with no Pi"
-    reset_target
-    remove_mock pi
-
-    local out rc=0
-    out="$(run_installer --version 0.99.0)" || rc=$?
-
-    if [ "$rc" -eq 0 ]; then
-        pass "exits successfully"
-    else
-        fail "should succeed" "got exit $rc"
-    fi
-
-    if echo "$out" | grep -q "Pi is not installed"; then
-        pass "warns Pi is missing"
-    else
-        fail "should warn Pi is missing"
-    fi
-
-    if [ -d "$WORK_DIR/target/extensions" ]; then
-        pass "extensions installed"
-    else
-        fail "extensions should be installed"
-    fi
-
-    if echo "$out" | grep -q "pi install"; then
-        pass "shows manual registration command"
-    else
-        fail "should show manual registration command"
-    fi
-}
-
-test_nontty_no_pi_no_npm_still_downloads() {
-    echo "Non-TTY with no Pi and no npm"
-    reset_target
-    remove_mock pi
-    remove_mock npm
-
-    local out rc=0
-    out="$(run_installer --version 0.99.0)" || rc=$?
-
-    if [ "$rc" -eq 0 ]; then
-        pass "exits successfully"
-    else
-        fail "should succeed" "got exit $rc"
-    fi
-
-    if echo "$out" | grep -q "npm not found"; then
-        pass "warns npm is missing"
-    else
-        fail "should warn npm is missing"
-    fi
-
-    if [ -d "$WORK_DIR/target/extensions" ]; then
-        pass "extensions installed"
-    else
-        fail "extensions should be installed"
-    fi
-
-    if echo "$out" | grep -q "pi install"; then
-        pass "shows manual registration command"
-    else
-        fail "should show manual registration command"
-    fi
-}
-
-test_node_version_floor() {
-    echo "Node.js version gate enforces >= 20.6.0"
-    reset_target
-    remove_mock pi
-
-    local real_node="$WORK_DIR/bin/node.real"
-    mv "$WORK_DIR/bin/node" "$real_node"
-
-    cat > "$WORK_DIR/bin/node" << 'MOCK'
-#!/usr/bin/env bash
-if [ "${1:-}" = "--version" ]; then
-    echo "v20.0.0"
-    exit 0
-fi
-exec "$(dirname "$0")/node.real" "$@"
-MOCK
-    chmod +x "$WORK_DIR/bin/node"
-
-    local out rc=0
-    out="$(run_installer --version 0.99.0)" || rc=$?
-
-    mv "$real_node" "$WORK_DIR/bin/node"
-
-    if [ "$rc" -ne 0 ]; then
-        pass "exits non-zero"
-    else
-        fail "should exit non-zero" "got $rc"
-    fi
-
-    if echo "$out" | grep -q "Node.js >= 20.6.0 required"; then
-        pass "prints version floor error"
-    else
-        fail "should print version floor error"
-    fi
-
-    if [ ! -d "$WORK_DIR/target/extensions" ]; then
-        pass "does not install anything"
-    else
-        fail "should not have installed extensions"
-    fi
-}
-
-test_missing_version_value() {
-    echo "Missing --version value returns a usage error"
-    reset_target
-    mock_pi "0.66.5"
-
-    local out rc=0
-    out="$(run_installer --version)" || rc=$?
-
-    if [ "$rc" -ne 0 ]; then
-        pass "exits non-zero"
-    else
-        fail "should exit non-zero" "got $rc"
-    fi
-
-    if echo "$out" | grep -q "Option --version requires a value"; then
-        pass "prints a helpful error"
-    else
-        fail "should print a helpful error"
-    fi
-
-    if echo "$out" | grep -q "Usage:"; then
-        pass "shows usage"
-    else
-        fail "should show usage"
-    fi
-}
-
-test_stale_subagents_removed() {
-    echo "Stale subagents removed on reinstall without --with subagents"
-    reset_target
-    mock_pi "0.66.5"
-
-    # Simulate a prior install that included subagents
-    mkdir -p "$WORK_DIR/target/subagents"
-    echo "stale" > "$WORK_DIR/target/subagents/marker"
-
-    local out rc=0
-    out="$(run_installer --version 0.99.0)" || rc=$?
-
-    if [ "$rc" -eq 0 ]; then
-        pass "reinstall succeeds"
-    else
-        fail "reinstall should succeed" "exit $rc"
-    fi
-
-    if [ ! -d "$WORK_DIR/target/subagents" ]; then
-        pass "subagents/ directory removed"
-    else
-        fail "subagents/ should be removed"
-    fi
-
-    if echo "$out" | grep -qi "stale subagents"; then
-        pass "warns about stale removal"
-    else
-        fail "should warn about stale subagents"
-    fi
-
-    if ! grep -q '"subagents"' "$WORK_DIR/target/package.json"; then
-        pass "package.json excludes subagents"
-    else
-        fail "package.json should not mention subagents"
-    fi
-}
-
-test_subagents_included_when_requested() {
-    echo "Subagents installed when --with subagents passed"
-    reset_target
-    mock_pi "0.66.5"
-
-    # Mock curl: serve local subagents tarball for subagent URLs, delegate otherwise
-    cat > "$WORK_DIR/bin/curl" << MOCK
+    # ── Mock curl: serve local fixtures, delegate the rest ──────────
+    cat > "$TEST_DIR/bin/curl" << MOCK
 #!/usr/bin/env bash
 for arg in "\$@"; do
     if [[ "\$arg" == *"pi-interactive-subagents"* ]]; then
-        cat "$WORK_DIR/subagents.tar.gz"
+        cat "$TEST_DIR/subagents.tar.gz"
         exit 0
     fi
 done
 exec "$REAL_CURL" "\$@"
 MOCK
-    chmod +x "$WORK_DIR/bin/curl"
-
-    local out rc=0
-    out="$(run_installer --version 0.99.0 --with subagents)" || rc=$?
-
-    remove_mock curl
-
-    if [ "$rc" -eq 0 ]; then
-        pass "install succeeds"
-    else
-        fail "should succeed" "exit $rc — $out"
-    fi
-
-    if [ -d "$WORK_DIR/target/subagents" ]; then
-        pass "subagents/ directory exists"
-    else
-        fail "subagents/ should exist"
-    fi
-
-    if grep -q '"subagents"' "$WORK_DIR/target/package.json" 2>/dev/null; then
-        pass "package.json includes subagents"
-    else
-        fail "package.json should include subagents"
-    fi
+    chmod +x "$TEST_DIR/bin/curl"
 }
 
-test_git_fallback_excludes_prereleases() {
-    echo "Version resolution: git fallback skips prerelease tags"
-    reset_target
+destroy_env() {
+    [ -n "$TEST_DIR" ] && rm -rf "$TEST_DIR"
+    TEST_DIR=""
+}
+
+# ── Mock helpers ────────────────────────────────────────────────────────
+
+# Create a mock pi binary that reports the given version.
+# Also logs install/remove calls to $TEST_DIR/pi.log for verification.
+mock_pi() {
+    local version="$1"
+    cat > "$TEST_DIR/bin/pi" << MOCK
+#!/usr/bin/env bash
+case "\$1" in
+    --version) echo "$version" ;;
+    install|remove) echo "\$@" >> "$TEST_DIR/pi.log"; exit 0 ;;
+    *) exit 0 ;;
+esac
+MOCK
+    chmod +x "$TEST_DIR/bin/pi"
+}
+
+mock_node_version() {
+    local version="$1"
+    mv "$TEST_DIR/bin/node" "$TEST_DIR/bin/node.real"
+    cat > "$TEST_DIR/bin/node" << MOCK
+#!/usr/bin/env bash
+if [ "\${1:-}" = "--version" ]; then
+    echo "$version"
+    exit 0
+fi
+exec "\$(dirname "\$0")/node.real" "\$@"
+MOCK
+    chmod +x "$TEST_DIR/bin/node"
+}
+
+# Run install.sh with stdin from /dev/null (non-TTY) and controlled env.
+# Prefix env var overrides before the -- separator, installer args after.
+#   run_installer --version 0.99.0
+#   run_installer PIZZA_TARBALL_URL="file:///other.tar.gz" -- --version 0.99.0
+run_installer() {
+    local -a env_overrides=()
+    local -a installer_args=()
+    local past_sep=0
+
+    for arg in "$@"; do
+        if [ "$past_sep" -eq 1 ]; then
+            installer_args+=("$arg")
+        elif [ "$arg" = "--" ]; then
+            past_sep=1
+        elif [[ "$arg" == *=* ]]; then
+            env_overrides+=("$arg")
+        else
+            # No separator used — everything is installer args
+            installer_args+=("$arg")
+        fi
+    done
+
+    env \
+        PATH="$TEST_DIR/bin:/usr/bin:/bin" \
+        PIZZA_HOME="$TEST_DIR/target" \
+        PIZZA_TARBALL_URL="file://$TEST_DIR/pizza.tar.gz" \
+        "${env_overrides[@]+"${env_overrides[@]}"}" \
+        bash "$INSTALL_SCRIPT" "${installer_args[@]+"${installer_args[@]}"}" </dev/null 2>&1
+}
+
+# ── Assertion helpers ───────────────────────────────────────────────────
+
+assert_exits_nonzero() {
+    local label="$1" rc="$2"
+    if [ "$rc" -ne 0 ]; then pass "$label"; else fail "$label" "expected non-zero, got $rc"; fi
+}
+
+assert_exits_zero() {
+    local label="$1" rc="$2"
+    if [ "$rc" -eq 0 ]; then pass "$label"; else fail "$label" "expected zero, got $rc"; fi
+}
+
+assert_output_contains() {
+    local label="$1" out="$2" pattern="$3"
+    if echo "$out" | grep -q "$pattern"; then pass "$label"; else fail "$label" "pattern not found: $pattern"; fi
+}
+
+assert_output_not_contains() {
+    local label="$1" out="$2" pattern="$3"
+    if ! echo "$out" | grep -q "$pattern"; then pass "$label"; else fail "$label" "pattern should not match: $pattern"; fi
+}
+
+assert_dir_exists() {
+    local label="$1" dir="$2"
+    if [ -d "$dir" ]; then pass "$label"; else fail "$label" "$dir does not exist"; fi
+}
+
+assert_dir_missing() {
+    local label="$1" dir="$2"
+    if [ ! -d "$dir" ]; then pass "$label"; else fail "$label" "$dir should not exist"; fi
+}
+
+assert_file_exists() {
+    local label="$1" file="$2"
+    if [ -f "$file" ]; then pass "$label"; else fail "$label" "$file does not exist"; fi
+}
+
+assert_file_contains() {
+    local label="$1" file="$2" pattern="$3"
+    if grep -q "$pattern" "$file" 2>/dev/null; then pass "$label"; else fail "$label" "pattern not found in $file: $pattern"; fi
+}
+
+assert_file_not_contains() {
+    local label="$1" file="$2" pattern="$3"
+    if ! grep -q "$pattern" "$file" 2>/dev/null; then pass "$label"; else fail "$label" "pattern should not be in $file: $pattern"; fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# Tests: Pi missing
+# ═══════════════════════════════════════════════════════════════════════
+
+test_no_pi_exits_with_error() {
+    echo "Pi not installed → hard error"
+    create_env
+
+    local out rc=0
+    out="$(run_installer --version 0.99.0)" || rc=$?
+
+    assert_exits_nonzero "exits non-zero" "$rc"
+    assert_output_contains "says Pi is not installed" "$out" "Pi is not installed"
+    assert_output_contains "shows install command" "$out" "npm install -g"
+    assert_dir_missing "nothing installed" "$TEST_DIR/target/extensions"
+
+    destroy_env
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# Tests: Pi wrong version
+# ═══════════════════════════════════════════════════════════════════════
+
+test_incompatible_pi_nontty_exits() {
+    echo "Incompatible Pi (non-TTY) → hard error"
+    create_env
+    mock_pi "0.67.0"
+
+    local out rc=0
+    out="$(run_installer --version 0.99.0)" || rc=$?
+
+    assert_exits_nonzero "exits non-zero" "$rc"
+    assert_output_contains "shows incompatibility" "$out" "not compatible"
+    assert_output_contains "shows update command" "$out" "npm install -g"
+    assert_dir_missing "nothing installed" "$TEST_DIR/target/extensions"
+
+    destroy_env
+}
+
+test_incompatible_pi_no_npm_exits() {
+    echo "Incompatible Pi + no npm → hard error"
+    create_env
+    mock_pi "0.65.0"
+    rm -f "$TEST_DIR/bin/npm"
+
+    local out rc=0
+    out="$(run_installer --version 0.99.0)" || rc=$?
+
+    assert_exits_nonzero "exits non-zero" "$rc"
+    assert_output_contains "says npm not found" "$out" "npm not found"
+    assert_output_contains "shows update command" "$out" "npm install -g"
+    assert_dir_missing "nothing installed" "$TEST_DIR/target/extensions"
+
+    destroy_env
+}
+
+# ════════════════════════════════════════════════��══════════════════════
+# Tests: Node.js
+# ═══════════════════════════════════════════════════════════════════════
+
+test_node_too_old_exits() {
+    echo "Node.js < 20.6.0 → hard error"
+    create_env
+    mock_pi "0.66.5"
+    mock_node_version "v20.0.0"
+
+    local out rc=0
+    out="$(run_installer --version 0.99.0)" || rc=$?
+
+    assert_exits_nonzero "exits non-zero" "$rc"
+    assert_output_contains "shows version requirement" "$out" "Node.js >= 20.6.0 required"
+    assert_dir_missing "nothing installed" "$TEST_DIR/target/extensions"
+
+    destroy_env
+}
+
+test_node_missing_exits() {
+    echo "Node.js not installed → hard error"
+    create_env
+    rm -f "$TEST_DIR/bin/node"
+
+    local out rc=0
+    out="$(run_installer --version 0.99.0)" || rc=$?
+
+    assert_exits_nonzero "exits non-zero" "$rc"
+    assert_output_contains "says Node required" "$out" "Node.js is required"
+
+    destroy_env
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# Tests: happy path
+# ═══════════════════════════════════════════════════════════════════════
+
+test_successful_install() {
+    echo "Happy path: compatible Pi → full install"
+    create_env
     mock_pi "0.66.5"
 
-    # Mock curl: fail for GitHub API, pass through for local tarball
-    cat > "$WORK_DIR/bin/curl" << MOCK
+    local out rc=0
+    out="$(run_installer --version 0.99.0)" || rc=$?
+
+    assert_exits_zero "exits zero" "$rc"
+    assert_dir_exists "extensions/ installed" "$TEST_DIR/target/extensions"
+    assert_dir_exists "skills/ installed" "$TEST_DIR/target/skills"
+    assert_dir_exists "prompts/ installed" "$TEST_DIR/target/prompts"
+    assert_dir_exists "subagents/ installed" "$TEST_DIR/target/subagents"
+    assert_file_exists "LICENSE copied" "$TEST_DIR/target/LICENSE"
+    assert_output_contains "shows success" "$out" "installed successfully"
+    assert_output_contains "registered with Pi" "$out" "Registered with Pi"
+
+    destroy_env
+}
+
+test_package_json_generated() {
+    echo "package.json has correct version and includes subagents"
+    create_env
+    mock_pi "0.66.5"
+
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+
+    assert_file_exists "package.json exists" "$TEST_DIR/target/package.json"
+    assert_file_contains "version is 0.99.0" "$TEST_DIR/target/package.json" '"version": "0.99.0"'
+    assert_file_contains "extensions field present" "$TEST_DIR/target/package.json" '"extensions"'
+    assert_file_contains "subagents included" "$TEST_DIR/target/package.json" '"subagents"'
+
+    destroy_env
+}
+
+test_pi_install_called_with_correct_path() {
+    echo "pi install is called with the install directory"
+    create_env
+    mock_pi "0.66.5"
+
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+
+    assert_file_exists "pi was called" "$TEST_DIR/pi.log"
+    assert_file_contains "pi install called with target" "$TEST_DIR/pi.log" "install $TEST_DIR/target"
+    # remove is called first (cleanup of previous registration)
+    assert_file_contains "pi remove called with target" "$TEST_DIR/pi.log" "remove $TEST_DIR/target"
+
+    destroy_env
+}
+
+test_reinstall_cleans_old_files() {
+    echo "Reinstall replaces old extension files"
+    create_env
+    mock_pi "0.66.5"
+
+    # First install
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+
+    # Drop a leftover file
+    echo "stale" > "$TEST_DIR/target/extensions/leftover.txt"
+
+    # Reinstall
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+
+    if [ ! -f "$TEST_DIR/target/extensions/leftover.txt" ]; then
+        pass "stale file removed on reinstall"
+    else
+        fail "stale file should be removed"
+    fi
+
+    destroy_env
+}
+
+test_version_v_prefix_stripped() {
+    echo "--version v0.99.0 strips the v prefix"
+    create_env
+    mock_pi "0.66.5"
+
+    local out rc=0
+    out="$(run_installer --version v0.99.0)" || rc=$?
+
+    assert_exits_zero "exits zero" "$rc"
+    assert_output_contains "installs 0.99.0 (no v)" "$out" "Installing Pizza v0.99.0"
+    assert_file_contains "package.json version has no v" "$TEST_DIR/target/package.json" '"version": "0.99.0"'
+
+    destroy_env
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# Tests: download failures
+# ══════════════════════════════════════════��════════════════════════════
+
+test_bad_tarball_url_exits() {
+    echo "Failed pizza tarball download → hard error"
+    create_env
+    mock_pi "0.66.5"
+
+    local out rc=0
+    out="$(run_installer PIZZA_TARBALL_URL="file:///nonexistent/pizza-0.99.0.tar.gz" -- --version 0.99.0)" || rc=$?
+
+    assert_exits_nonzero "exits non-zero" "$rc"
+    assert_output_contains "shows download error" "$out" "Failed to download"
+    assert_dir_missing "nothing installed" "$TEST_DIR/target/extensions"
+
+    destroy_env
+}
+
+test_corrupt_tarball_exits() {
+    echo "Tarball missing extensions/ → hard error"
+    create_env
+    mock_pi "0.66.5"
+
+    # Create a tarball without extensions/
+    local bad="$TEST_DIR/bad_fixture/pizza-0.99.0"
+    mkdir -p "$bad/skills" "$bad/prompts"
+    echo '{}' > "$bad/skills/stub.json"
+    tar -czf "$TEST_DIR/pizza.tar.gz" -C "$TEST_DIR/bad_fixture" .
+
+    local out rc=0
+    out="$(run_installer --version 0.99.0)" || rc=$?
+
+    assert_exits_nonzero "exits non-zero" "$rc"
+    assert_output_contains "says extensions missing" "$out" "does not contain extensions"
+
+    destroy_env
+}
+
+test_subagents_download_failure_exits() {
+    echo "Failed subagents download → hard error"
+    create_env
+    mock_pi "0.66.5"
+
+    # Override curl mock to fail on subagents URL
+    cat > "$TEST_DIR/bin/curl" << MOCK
 #!/usr/bin/env bash
 for arg in "\$@"; do
-    if [[ "\$arg" == *"api.github.com"* ]]; then
+    if [[ "\$arg" == *"pi-interactive-subagents"* ]]; then
         exit 1
     fi
 done
 exec "$REAL_CURL" "\$@"
 MOCK
-    chmod +x "$WORK_DIR/bin/curl"
+    chmod +x "$TEST_DIR/bin/curl"
+
+    local out rc=0
+    out="$(run_installer --version 0.99.0)" || rc=$?
+
+    assert_exits_nonzero "exits non-zero" "$rc"
+    assert_output_contains "shows subagents error" "$out" "Failed to download subagents"
+
+    destroy_env
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# Tests: CLI argument handling
+# ═══════════════════════════════════════════════════════════════════════
+
+test_missing_version_value() {
+    echo "Missing --version value → error with usage"
+    create_env
+    mock_pi "0.66.5"
+
+    local out rc=0
+    out="$(run_installer --version)" || rc=$?
+
+    assert_exits_nonzero "exits non-zero" "$rc"
+    assert_output_contains "shows error" "$out" "Option --version requires a value"
+    assert_output_contains "shows usage" "$out" "Usage:"
+
+    destroy_env
+}
+
+test_unknown_option() {
+    echo "Unknown option → error with usage"
+    create_env
+
+    local out rc=0
+    out="$(run_installer --bogus)" || rc=$?
+
+    assert_exits_nonzero "exits non-zero" "$rc"
+    assert_output_contains "shows error" "$out" "Unknown option: --bogus"
+    assert_output_contains "shows usage" "$out" "Usage:"
+
+    destroy_env
+}
+
+test_help_flag() {
+    echo "--help prints usage and exits cleanly"
+    create_env
+
+    local out rc=0
+    out="$(run_installer --help)" || rc=$?
+
+    assert_exits_zero "exits zero" "$rc"
+    assert_output_contains "shows usage" "$out" "Usage:"
+    assert_output_contains "shows options" "$out" "Options:"
+    assert_output_contains "shows examples" "$out" "Examples:"
+
+    destroy_env
+}
+
+# ═════════════════════════════════════════════════���═════════════════════
+# Tests: uninstall
+# ══════════════════════════════════════════════════════════════════��════
+
+test_uninstall_removes_directory() {
+    echo "Uninstall removes install directory and deregisters"
+    create_env
+    mock_pi "0.66.5"
+
+    # Install first
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+
+    local out rc=0
+    out="$(run_installer --uninstall)" || rc=$?
+
+    assert_exits_zero "exits zero" "$rc"
+    assert_dir_missing "install directory removed" "$TEST_DIR/target"
+    assert_output_contains "deregistered" "$out" "Deregistered from Pi"
+
+    destroy_env
+}
+
+test_uninstall_nonexistent() {
+    echo "Uninstall with nothing to remove → clean exit"
+    create_env
+    mock_pi "0.66.5"
+
+    local out rc=0
+    out="$(run_installer --uninstall)" || rc=$?
+
+    assert_exits_zero "exits zero" "$rc"
+    assert_output_contains "says nothing to uninstall" "$out" "Nothing to uninstall"
+
+    destroy_env
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# Tests: version resolution
+# ══════════════════════════════════════════════���════════════════════════
+
+test_git_fallback_excludes_prereleases() {
+    echo "Version resolution: git fallback skips prerelease tags"
+    create_env
+    mock_pi "0.66.5"
+
+    # Override curl: fail for GitHub API, pass through for tarballs
+    cat > "$TEST_DIR/bin/curl" << MOCK
+#!/usr/bin/env bash
+for arg in "\$@"; do
+    if [[ "\$arg" == *"api.github.com"* ]]; then
+        exit 1
+    fi
+    if [[ "\$arg" == *"pi-interactive-subagents"* ]]; then
+        cat "$TEST_DIR/subagents.tar.gz"
+        exit 0
+    fi
+done
+exec "$REAL_CURL" "\$@"
+MOCK
+    chmod +x "$TEST_DIR/bin/curl"
 
     # Mock git ls-remote: return stable + prerelease tags
-    cat > "$WORK_DIR/bin/git" << 'MOCK'
+    cat > "$TEST_DIR/bin/git" << 'MOCK'
 #!/usr/bin/env bash
 if [ "${1:-}" = "ls-remote" ]; then
     cat << 'TAGS'
@@ -362,37 +555,23 @@ TAGS
 fi
 exit 0
 MOCK
-    chmod +x "$WORK_DIR/bin/git"
+    chmod +x "$TEST_DIR/bin/git"
 
     # Prepare a tarball matching the expected resolved version (0.2.0)
-    local pkg="$WORK_DIR/versioned/pizza-0.2.0"
+    local pkg="$TEST_DIR/versioned/pizza-0.2.0"
     mkdir -p "$pkg/extensions" "$pkg/skills" "$pkg/prompts"
     echo '{}' > "$pkg/extensions/stub.json"
     echo '{}' > "$pkg/skills/stub.json"
     echo '{}' > "$pkg/prompts/stub.json"
-    tar -czf "$WORK_DIR/versioned.tar.gz" -C "$WORK_DIR/versioned" .
+    tar -czf "$TEST_DIR/versioned.tar.gz" -C "$TEST_DIR/versioned" .
 
     local out rc=0
-    out="$(env \
-        PATH="$WORK_DIR/bin:/usr/bin:/bin" \
-        PIZZA_HOME="$WORK_DIR/target" \
-        PIZZA_TARBALL_URL="file://$WORK_DIR/versioned.tar.gz" \
-        bash "$INSTALL_SCRIPT" </dev/null 2>&1)" || rc=$?
+    out="$(run_installer PIZZA_TARBALL_URL="file://$TEST_DIR/versioned.tar.gz" --)" || rc=$?
 
-    remove_mock curl
-    remove_mock git
+    assert_exits_zero "exits zero" "$rc"
+    assert_output_contains "resolves to 0.2.0" "$out" "Installing Pizza v0\.2\.0"
 
-    if [ "$rc" -eq 0 ]; then
-        pass "install succeeds via git fallback"
-    else
-        fail "should succeed" "exit $rc — $out"
-    fi
-
-    if echo "$out" | grep -q "Installing Pizza v0\.2\.0"; then
-        pass "resolves to 0.2.0 (skips prereleases)"
-    else
-        fail "should resolve to 0.2.0" "output: $out"
-    fi
+    destroy_env
 }
 
 test_prerelease_tag_detection() {
@@ -400,7 +579,6 @@ test_prerelease_tag_detection() {
 
     # Mirrors the [[ "\$TAG" == *-* ]] check in release.yml
     local ok=1
-
     for tag in v0.1.0 v1.0.0 v2.3.4; do
         if [[ "$tag" == *-* ]]; then
             fail "stable tag '$tag' wrongly detected as prerelease"
@@ -419,30 +597,66 @@ test_prerelease_tag_detection() {
     [ "$ok" -eq 1 ] && pass "prerelease tags detected"
 }
 
-# ── Runner ──────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+# Runner
+# ═══════════════════════════════════════════════════════════════════════
 main() {
     echo ""
     echo "install.sh smoke tests"
     echo "======================"
 
-    setup
-    trap teardown EXIT
+    echo ""
+    echo "--- Pi missing ---"
+    test_no_pi_exits_with_error
 
     echo ""
-    test_nontty_incompatible_pi_exits
+    echo "--- Pi wrong version ---"
+    test_incompatible_pi_nontty_exits
     echo ""
-    test_nontty_no_pi_skips_registration
+    test_incompatible_pi_no_npm_exits
+
     echo ""
-    test_nontty_no_pi_no_npm_still_downloads
+    echo "--- Node.js ---"
+    test_node_too_old_exits
     echo ""
-    test_node_version_floor
+    test_node_missing_exits
+
     echo ""
+    echo "--- Happy path ---"
+    test_successful_install
+    echo ""
+    test_package_json_generated
+    echo ""
+    test_pi_install_called_with_correct_path
+    echo ""
+    test_reinstall_cleans_old_files
+    echo ""
+    test_version_v_prefix_stripped
+
+    echo ""
+    echo "--- Download failures ---"
+    test_bad_tarball_url_exits
+    echo ""
+    test_corrupt_tarball_exits
+    echo ""
+    test_subagents_download_failure_exits
+
+    echo ""
+    echo "--- CLI arguments ---"
     test_missing_version_value
     echo ""
-    test_stale_subagents_removed
+    test_unknown_option
     echo ""
-    test_subagents_included_when_requested
+    test_help_flag
+
     echo ""
+    echo "--- Uninstall ---"
+    test_uninstall_removes_directory
+    echo ""
+    test_uninstall_nonexistent
+
+    echo ""
+    echo "--- Version resolution ---"
     test_git_fallback_excludes_prereleases
     echo ""
     test_prerelease_tag_detection
