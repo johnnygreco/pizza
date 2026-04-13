@@ -9,7 +9,7 @@ Pizza is [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agen
 Requires **Node.js >= 20.6.0** and **Pi ~0.66.1**.
 
 ```bash
-pi install npm:pizza-pi
+pi install npm:@johnnygreco/pizza-pi
 ```
 
 ## 🧩 What's Included

@@ -1,5 +1,5 @@
 {
-  "name": "pizza-pi",
+  "name": "@johnnygreco/pizza-pi",
   "version": "0.1.1",
   "description": "🍕 Pizza — Pi with toppings",
   "type": "module",
