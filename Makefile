@@ -1,4 +1,16 @@
-.PHONY: publish test typecheck
+.PHONY: release setup test typecheck
+
+SUBAGENTS_REPO = https://github.com/HazAT/pi-interactive-subagents.git
+SUBAGENTS_COMMIT = bf4fb961c14567c949e010dca5ec01590b08289a
+
+setup:
+	@if [ -d subagents ]; then \
+		echo "subagents/ already exists. To update: rm -rf subagents && make setup"; \
+	else \
+		git clone $(SUBAGENTS_REPO) subagents; \
+		git -C subagents checkout $(SUBAGENTS_COMMIT); \
+		echo "Subagents extension cloned to subagents/"; \
+	fi
 
 test:
 	npm test
@@ -6,9 +18,9 @@ test:
 typecheck:
 	npm run typecheck
 
-publish:
+release:
 ifndef VERSION
-	$(error VERSION is required. Usage: make publish VERSION=0.2.0)
+	$(error VERSION is required. Usage: make release VERSION=0.2.0)
 endif
 	@# Ensure we're on main
 	@BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
@@ -36,11 +48,9 @@ endif
 	npm version $(VERSION) --no-git-tag-version
 	git add package.json package-lock.json
 	git commit -m "v$(VERSION)"
-	@# Create and push tag
+	@# Create and push tag (CI creates the GitHub release)
 	git tag "v$(VERSION)"
 	git push origin main
 	git push origin "v$(VERSION)"
-	@# Cut GitHub release with auto-generated notes
-	gh release create "v$(VERSION)" --generate-notes
 	@echo ""
-	@echo "Published v$(VERSION)"
+	@echo "Tag v$(VERSION) pushed. CI will create the GitHub release."
