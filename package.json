@@ -1,6 +1,6 @@
 {
   "name": "@johnnygreco/pizza-pi",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "🍕 Pizza — Pi with toppings",
   "type": "module",
   "license": "Apache-2.0",
@@ -54,10 +54,18 @@
     "@sinclair/typebox": "~0.34.49"
   },
   "peerDependenciesMeta": {
-    "@mariozechner/pi-coding-agent": { "optional": true },
-    "@mariozechner/pi-ai": { "optional": true },
-    "@mariozechner/pi-tui": { "optional": true },
-    "@sinclair/typebox": { "optional": true }
+    "@mariozechner/pi-coding-agent": {
+      "optional": true
+    },
+    "@mariozechner/pi-ai": {
+      "optional": true
+    },
+    "@mariozechner/pi-tui": {
+      "optional": true
+    },
+    "@sinclair/typebox": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "0.66.1",
