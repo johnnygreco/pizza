@@ -51,6 +51,25 @@ M
     echo '{}' > "$pkg/extensions/stub.json"
     echo '{}' > "$pkg/skills/stub.json"
     echo '{}' > "$pkg/prompts/stub.json"
+    cat > "$pkg/package.json" << 'PKG'
+{
+  "name": "pizza",
+  "version": "0.99.0",
+  "pizza": {
+    "compatibility": {
+      "pi": "~0.66.0"
+    }
+  },
+  "pi": {
+    "extensions": ["extensions", "subagents"],
+    "skills": ["skills"],
+    "prompts": ["prompts"]
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "0.66.1"
+  }
+}
+PKG
     cat > "$pkg/agents/test-agent.md" << 'AGENT'
 ---
 name: test-agent
@@ -251,6 +270,32 @@ test_incompatible_pi_no_npm_exits() {
     destroy_env
 }
 
+test_incompatible_pi_uses_dependency_fallback_when_metadata_missing() {
+    echo "Incompatible Pi uses inferred range when metadata is missing"
+    create_env
+    mock_pi "0.67.0"
+
+    cat > "$TEST_DIR/fixture/pizza-0.99.0/package.json" << 'PKG'
+{
+  "name": "pizza",
+  "version": "0.99.0",
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "0.66.1"
+  }
+}
+PKG
+    tar -czf "$TEST_DIR/pizza.tar.gz" -C "$TEST_DIR/fixture" .
+
+    local out rc=0
+    out="$(run_installer --version 0.99.0)" || rc=$?
+
+    assert_exits_nonzero "exits non-zero" "$rc"
+    assert_output_contains "shows inferred range" "$out" "requires 0.66.x"
+    assert_dir_missing "nothing installed" "$TEST_DIR/target/extensions"
+
+    destroy_env
+}
+
 # ════════════════════════════════════════════════��══════════════════════
 # Tests: Node.js
 # ═══════════════════════════════════════════════════════════════════════
@@ -335,6 +380,7 @@ test_package_json_generated() {
     assert_file_contains "version is 0.99.0" "$TEST_DIR/target/package.json" '"version": "0.99.0"'
     assert_file_contains "extensions field present" "$TEST_DIR/target/package.json" '"extensions"'
     assert_file_contains "subagents included" "$TEST_DIR/target/package.json" '"subagents"'
+    assert_file_contains "pi compatibility is preserved" "$TEST_DIR/target/package.json" '"pi": "~0.66.0"'
 
     destroy_env
 }
@@ -693,6 +739,8 @@ main() {
     test_incompatible_pi_nontty_exits
     echo ""
     test_incompatible_pi_no_npm_exits
+    echo ""
+    test_incompatible_pi_uses_dependency_fallback_when_metadata_missing
 
     echo ""
     echo "--- Node.js ---"

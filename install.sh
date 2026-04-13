@@ -6,7 +6,7 @@ main() {
     REPO="johnnygreco/pizza"
     SUBAGENTS_REPO="nicobailon/pi-subagents"
     SUBAGENTS_COMMIT="9d1e88b2d9e48bc59503814fd443850341f74907"
-    REQUIRED_PI_MAJOR_MINOR="0.66"
+    DEFAULT_PI_COMPATIBILITY_RANGE="~0.66.0"
     DEFAULT_INSTALL_DIR="$HOME/.pizza"
 
     # ── Color helpers (tty-aware) ────────────────────────────────────────
@@ -116,9 +116,6 @@ main() {
     fi
     success "Node.js v$NODE_VERSION"
 
-    # ── Check / install Pi ───────────────────────────────────────────────
-    check_pi
-
     # ── Resolve version ──────────────────────────────────────────────────
     if [ -n "$PINNED_VERSION" ]; then
         VERSION="$PINNED_VERSION"
@@ -146,6 +143,11 @@ main() {
         error "Downloaded archive does not contain extensions/"
         exit 1
     fi
+
+    PI_COMPATIBILITY_RANGE="$(resolve_pi_compatibility_range "$EXTRACTED/package.json")"
+
+    # ── Check / install Pi ───────────────────────────────────────────────
+    check_pi "$PI_COMPATIBILITY_RANGE"
 
     # ── Install core extensions ──────────────────────────────────────────
     mkdir -p "$INSTALL_DIR"
@@ -177,7 +179,7 @@ main() {
     link_agents
 
     # ── Generate package.json ────────────────────────────────────────────
-    generate_package_json "$VERSION"
+    generate_package_json "$VERSION" "$PI_COMPATIBILITY_RANGE"
 
     # ── Register with Pi ─────────────────────────────────────────────────
     pi remove "$INSTALL_DIR" 2>/dev/null || true
@@ -298,8 +300,103 @@ Examples:
 EOF
 }
 
+extract_first_semver() {
+    node -e '
+const input = process.argv[1] ?? "";
+const match = input.match(/(?:^|[^0-9])v?(\d+\.\d+(?:\.\d+)?)(?!\d)/);
+if (match) process.stdout.write(match[1]);
+' "$1"
+}
+
+describe_pi_range() {
+    node -e '
+const range = (process.argv[1] ?? "").trim();
+const match = range.match(/^~\s*v?(\d+)\.(\d+)\.(\d+)$/);
+process.stdout.write(match ? `${match[1]}.${match[2]}.x` : range);
+' "$1"
+}
+
+resolve_pi_compatibility_range() {
+    local package_json="$1"
+    local resolved=""
+
+    if [ -f "$package_json" ]; then
+        resolved="$(node -e '
+const fs = require("node:fs");
+const pkg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const explicit = pkg.pizza?.compatibility?.pi;
+if (typeof explicit === "string" && explicit.trim()) {
+  process.stdout.write(explicit.trim());
+  process.exit(0);
+}
+const dep =
+  pkg.devDependencies?.["@mariozechner/pi-coding-agent"] ??
+  pkg.dependencies?.["@mariozechner/pi-coding-agent"];
+if (typeof dep === "string") {
+  const match = dep.match(/(?:^|[^0-9])v?(\d+)\.(\d+)(?:\.(\d+))?(?!\d)/);
+  if (match) {
+    process.stdout.write(`~${match[1]}.${match[2]}.0`);
+  }
+}
+' "$package_json" 2>/dev/null || true)"
+    fi
+
+    if [ -n "$resolved" ]; then
+        echo "$resolved"
+    else
+        echo "$DEFAULT_PI_COMPATIBILITY_RANGE"
+    fi
+}
+
+pi_version_satisfies() {
+    node -e '
+function parseSemver(input) {
+  const match = String(input ?? "").match(/(?:^|[^0-9])v?(\d+)\.(\d+)(?:\.(\d+))?(?!\d)/);
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3] ?? "0"),
+  };
+}
+
+function compare(a, b) {
+  if (a.major !== b.major) return a.major - b.major;
+  if (a.minor !== b.minor) return a.minor - b.minor;
+  return a.patch - b.patch;
+}
+
+const version = parseSemver(process.argv[1]);
+const range = String(process.argv[2] ?? "").trim();
+if (!version) process.exit(1);
+
+const tilde = range.match(/^~\s*v?(\d+)\.(\d+)\.(\d+)$/);
+if (tilde) {
+  const minimum = {
+    major: Number(tilde[1]),
+    minor: Number(tilde[2]),
+    patch: Number(tilde[3]),
+  };
+  process.exit(
+    version.major === minimum.major &&
+    version.minor === minimum.minor &&
+    compare(version, minimum) >= 0
+      ? 0
+      : 1
+  );
+}
+
+const exact = parseSemver(range);
+process.exit(exact && compare(version, exact) === 0 ? 0 : 1);
+' "$1" "$2"
+}
+
 check_pi() {
-    local pi_install_cmd="npm install -g @mariozechner/pi-coding-agent@~${REQUIRED_PI_MAJOR_MINOR}.0"
+    local required_pi_range="$1"
+    local required_pi_label detected_pi_label raw_pi_version normalized_pi_version
+    local pi_install_cmd="npm install -g @mariozechner/pi-coding-agent@${required_pi_range}"
+
+    required_pi_label="$(describe_pi_range "$required_pi_range")"
 
     if ! command -v pi &>/dev/null; then
         error "Pi is not installed. Install it first, then re-run this script:"
@@ -307,15 +404,21 @@ check_pi() {
         exit 1
     fi
 
-    PI_VERSION="$(pi --version 2>&1 || echo "unknown")"
-    PI_MAJOR_MINOR="$(echo "$PI_VERSION" | cut -d. -f1,2)"
+    raw_pi_version="$(pi --version 2>&1 || echo "unknown")"
+    normalized_pi_version="$(extract_first_semver "$raw_pi_version")"
 
-    if [ "$PI_MAJOR_MINOR" = "$REQUIRED_PI_MAJOR_MINOR" ]; then
-        success "Pi v$PI_VERSION"
+    if [ -n "$normalized_pi_version" ]; then
+        detected_pi_label="v$normalized_pi_version"
+    else
+        detected_pi_label="version '$raw_pi_version'"
+    fi
+
+    if [ -n "$normalized_pi_version" ] && pi_version_satisfies "$normalized_pi_version" "$required_pi_range"; then
+        success "Pi v$normalized_pi_version"
         return
     fi
 
-    warn "Pi v$PI_VERSION found, but Pizza requires ~$REQUIRED_PI_MAJOR_MINOR.x"
+    warn "Pi ${detected_pi_label} found, but Pizza requires ${required_pi_label}"
 
     if ! command -v npm &>/dev/null; then
         error "npm not found, so Pi cannot be updated automatically. Update Pi, then re-run:"
@@ -328,18 +431,20 @@ check_pi() {
         read -r answer </dev/tty
         case "$answer" in
             [nN]*)
-                error "Pizza requires Pi ~$REQUIRED_PI_MAJOR_MINOR.x. Update Pi, then re-run:"
+                error "Pizza requires Pi ${required_pi_label}. Update Pi, then re-run:"
                 echo "  $pi_install_cmd"
                 exit 1
                 ;;
             *)
-                info "Updating Pi to ~$REQUIRED_PI_MAJOR_MINOR"
-                npm install -g "@mariozechner/pi-coding-agent@~${REQUIRED_PI_MAJOR_MINOR}.0"
-                success "Pi updated to v$(pi --version 2>&1)"
+                info "Updating Pi to ${required_pi_label}"
+                npm install -g "@mariozechner/pi-coding-agent@${required_pi_range}"
+                raw_pi_version="$(pi --version 2>&1 || echo "unknown")"
+                normalized_pi_version="$(extract_first_semver "$raw_pi_version")"
+                success "Pi updated to ${normalized_pi_version:+v$normalized_pi_version}${normalized_pi_version:-$raw_pi_version}"
                 ;;
         esac
     else
-        error "Pi v$PI_VERSION is not compatible (requires ~$REQUIRED_PI_MAJOR_MINOR.x). Update Pi, then re-run:"
+        error "Pi ${detected_pi_label} is not compatible (requires ${required_pi_label}). Update Pi, then re-run:"
         echo "  $pi_install_cmd"
         exit 1
     fi
@@ -381,12 +486,18 @@ resolve_latest_version() {
 
 generate_package_json() {
     local version="$1"
+    local pi_compatibility_range="$2"
 
     cat > "$INSTALL_DIR/package.json" << EOF
 {
   "name": "pizza",
   "version": "${version}",
   "description": "Pizza — Pi with toppings",
+  "pizza": {
+    "compatibility": {
+      "pi": "${pi_compatibility_range}"
+    }
+  },
   "pi": {
     "extensions": ["extensions", "subagents"],
     "skills": ["skills"],

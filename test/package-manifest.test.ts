@@ -7,4 +7,12 @@ describe("package manifest", () => {
 
     expect(pkg.pi?.extensions).toContain("subagents");
   });
+
+  it("declares the supported Pi range alongside the Pi dev dependency", () => {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    const match = pkg.devDependencies?.["@mariozechner/pi-coding-agent"]?.match(/^(\d+)\.(\d+)\./);
+
+    expect(match).toBeTruthy();
+    expect(pkg.pizza?.compatibility?.pi).toBe(`~${match[1]}.${match[2]}.0`);
+  });
 });

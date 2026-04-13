@@ -20,6 +20,11 @@
       "prompts"
     ]
   },
+  "pizza": {
+    "compatibility": {
+      "pi": "~0.66.0"
+    }
+  },
   "engines": {
     "node": ">=20.6.0"
   },

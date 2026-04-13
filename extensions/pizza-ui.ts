@@ -1,40 +1,57 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { VERSION as PI_VERSION } from "@mariozechner/pi-coding-agent";
-import { readFileSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename } from "node:path";
+import {
+  PIZZA_VERSION,
+  getPiCompatibilitySummary,
+  getPiCompatibilityWarning,
+} from "./shared/pi-compat.ts";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(
-  readFileSync(resolve(__dirname, "..", "package.json"), "utf-8"),
-);
+const VERSION = PIZZA_VERSION;
 
-const VERSION: string = pkg.version;
+export function maybeWarnAboutPiCompatibility(
+  ctx: {
+    hasUI?: boolean;
+    ui?: { notify(message: string, level: "warning"): void };
+  },
+  currentPiVersion = PI_VERSION,
+): void {
+  const warning = getPiCompatibilityWarning(currentPiVersion);
+  if (!warning) return;
 
-// ── ANSI color palette ───────────────────────────────────────
+  if (ctx.hasUI && ctx.ui) {
+    ctx.ui.notify(warning, "warning");
+    return;
+  }
+
+  console.warn(warning);
+}
+
+// ── Retro pizzeria arcade palette ────────────────────────────
 const R = "\x1b[0m";
 const B = "\x1b[1m";
 const fg = (n: number) => `\x1b[38;5;${n}m`;
 const bg = (n: number) => `\x1b[48;5;${n}m`;
 const BG_OFF = "\x1b[49m";
 
-const CRUST = fg(208);
-const CHEESE_BG = bg(220);
-const PEP = fg(196);
-const PEPPER = fg(46);
-const DRIP = fg(228);
-const SAUCE = fg(160);
-const CLR_P = B + fg(51);
-const CLR_I = B + fg(199);
-const CLR_Z1 = B + fg(226);
-const CLR_Z2 = B + fg(46);
-const CLR_A = B + fg(171);
-const BORDER_CLR = B + fg(93);
-const TAG_PI = B + fg(51);
-const TAG_TXT = fg(245);
-const KEY_CLR = B + fg(81);
+const CRUST = fg(179);
+const CHEESE_BG = bg(229);
+const PEP = fg(160);
+const PEPPER = fg(64);
+const DRIP = fg(223);
+const SAUCE = fg(130);
+const CLR_P = B + fg(223);
+const CLR_I = B + fg(221);
+const CLR_Z1 = B + fg(215);
+const CLR_Z2 = B + fg(209);
+const CLR_A = B + fg(180);
+const BORDER_CLR = B + fg(130);
+const TAG_PI = B + fg(215);
+const TAG_TXT = fg(180);
+const KEY_CLR = B + fg(221);
 const DESC_CLR = fg(252);
-const DIV_CLR = fg(240);
+const DIV_CLR = fg(94);
+const SECTION_CLR = B + fg(179);
 
 // ── Pizza art colorizer ──────────────────────────────────────
 function colorizePizza(line: string): string {
@@ -199,14 +216,14 @@ const PIZZA_LETTERS: { lines: string[]; clr: string }[] = [
 
 // Two-column shortcut grid: [left_key, left_desc, right_key, right_desc]
 const SHORTCUTS: [string, string, string, string][] = [
-  ["esc",   "interrupt",  "s+tab",   "cycle thinking"],
-  ["^c",    "clear",      "^p",      "cycle models"],
-  ["^c×2",  "exit",       "^l",      "select model"],
-  ["^d",    "exit (∅)",   "^o",      "expand tools"],
-  ["^z",    "suspend",    "^t",      "expand thinking"],
-  ["^k",    "del→end",    "^g",      "ext. editor"],
-  ["^v",    "paste img",  "a+enter", "queue follow-up"],
-  ["a+up",  "edit q'd",   "drop",    "files to attach"],
+  ["Esc",        "interrupt",      "Shift+Tab", "cycle thinking"],
+  ["Ctrl+C",     "clear editor",   "Ctrl+P",    "cycle models"],
+  ["Ctrl+C x2",  "quit",           "Ctrl+L",    "model picker"],
+  ["Ctrl+D",     "exit if empty",  "Ctrl+O",    "toggle tools"],
+  ["Ctrl+Z",     "suspend",        "Ctrl+T",    "toggle thinking"],
+  ["Ctrl+K",     "delete to end",  "Ctrl+G",    "external editor"],
+  ["Ctrl+V",     "paste image",    "Alt+Enter", "queue follow-up"],
+  ["Alt+Up",     "restore queued", "Drag+drop", "attach files"],
 ];
 
 const COMMANDS: [string, string][] = [
@@ -247,13 +264,49 @@ function buildLeftColumn(): string[] {
   return content;
 }
 
+function buildSectionRule(width: number, label: string): string {
+  const text = ` ${label.toUpperCase()} `;
+  if (width <= text.length) {
+    return SECTION_CLR + text.slice(0, width) + R;
+  }
+  const left = Math.floor((width - text.length) / 2);
+  const right = width - text.length - left;
+  return (
+    DIV_CLR + "─".repeat(left) + R +
+    SECTION_CLR + text + R +
+    DIV_CLR + "─".repeat(right) + R
+  );
+}
+
+function buildCommandsLine(rowW: number): string {
+  const segments = COMMANDS.map(
+    ([key, desc]) => KEY_CLR + key + R + " " + DESC_CLR + desc + R,
+  );
+  const visibleSegments = COMMANDS.map(([key, desc]) => `${key} ${desc}`);
+  const contentW = visibleSegments.reduce((sum, segment) => sum + segment.length, 0);
+  const gaps = Math.max(1, segments.length - 1);
+  const totalGap = Math.max(3 * gaps, rowW - contentW);
+  const baseGap = Math.floor(totalGap / gaps);
+  const extraGap = totalGap % gaps;
+
+  let line = "";
+  for (let i = 0; i < segments.length; i++) {
+    if (i > 0) {
+      line += " ".repeat(baseGap + (i <= extraGap ? 1 : 0));
+    }
+    line += segments[i];
+  }
+  return line;
+}
+
 function buildRightColumn(): string[] {
   const lkW = Math.max(...SHORTCUTS.map((s) => s[0].length));
   const ldW = Math.max(...SHORTCUTS.map((s) => s[1].length));
   const rkW = Math.max(...SHORTCUTS.map((s) => s[2].length));
   const rdW = Math.max(...SHORTCUTS.map((s) => s[3].length));
+  const rowW = lkW + 1 + ldW + 3 + rkW + 1 + rdW;
 
-  const lines: string[] = [];
+  const lines: string[] = [buildSectionRule(rowW, "hotkeys")];
   for (const [lk, ld, rk, rd] of SHORTCUTS) {
     lines.push(
       KEY_CLR + lk.padEnd(lkW) + R + " " +
@@ -264,16 +317,10 @@ function buildRightColumn(): string[] {
   }
 
   // Separator
-  const rowW = lkW + 1 + ldW + 3 + rkW + 1 + rdW;
-  lines.push(DIV_CLR + "─".repeat(rowW) + R);
+  lines.push(buildSectionRule(rowW, "quick commands"));
 
   // Commands
-  let cmdLine = "";
-  for (let i = 0; i < COMMANDS.length; i++) {
-    if (i > 0) cmdLine += "   ";
-    cmdLine += KEY_CLR + COMMANDS[i][0] + R + " " + DESC_CLR + COMMANDS[i][1] + R;
-  }
-  lines.push(cmdLine);
+  lines.push(buildCommandsLine(rowW));
 
   return lines;
 }
@@ -306,14 +353,17 @@ function fullWidthRow(content: string, totalW: number): string {
   );
 }
 
+const CENTER_PAD = "  ";
+const TWO_COL_OVERHEAD = 5 + CENTER_PAD.length * 2;
+
 function buildBanner(viewWidth: number, meta: SessionMeta): string[] {
   const leftLines = buildLeftColumn();
   const rightLines = buildRightColumn();
   const leftW = Math.max(...leftLines.map((l) => stripAnsi(l).length));
   const rightW = Math.max(...rightLines.map((l) => stripAnsi(l).length));
 
-  // Two-column row: │ left │ right │ = leftW + rightW + 7
-  const minTwoCol = leftW + rightW + 7;
+  // Two-column row: │ left  │  right │
+  const minTwoCol = leftW + rightW + TWO_COL_OVERHEAD;
 
   if (viewWidth >= minTwoCol) {
     return assembleTwoCol(leftLines, leftW, rightLines, viewWidth, meta);
@@ -328,7 +378,7 @@ function assembleTwoCol(
   totalW: number,
   meta: SessionMeta,
 ): string[] {
-  const rW = totalW - leftW - 7;
+  const rW = totalW - leftW - TWO_COL_OVERHEAD;
   const rows: string[] = [buildTopBorder(totalW)];
 
   // Top padding
@@ -341,8 +391,8 @@ function assembleTwoCol(
     const r = i < rightLines.length ? rightLines[i] : "";
     rows.push(
       BORDER_CLR + "│" + R + " " +
-      padRight(l, leftW) + " " +
-      BORDER_CLR + "│" + R + " " +
+      padRight(l, leftW) + CENTER_PAD +
+      BORDER_CLR + "│" + R + CENTER_PAD +
       padRight(r, rW) + " " +
       BORDER_CLR + "│" + R,
     );
@@ -420,6 +470,7 @@ class PizzaHeader {
 // ── Extension entry point ────────────────────────────────────
 export default function pizzaUiExtension(pi: ExtensionAPI): void {
   pi.on("session_start", async (event, ctx) => {
+    maybeWarnAboutPiCompatibility(ctx, PI_VERSION);
     if (!ctx.hasUI) return;
 
     ctx.ui.setTitle(`pizza \u00B7 ${basename(ctx.cwd)}`);
@@ -434,6 +485,7 @@ export default function pizzaUiExtension(pi: ExtensionAPI): void {
       const usage = ctx.getContextUsage();
       const lines = [
         `\u{1F355} pizza v${VERSION}`,
+        `Pi: ${getPiCompatibilitySummary(PI_VERSION)}`,
         `Model: ${model}`,
         `CWD: ${ctx.cwd}`,
       ];

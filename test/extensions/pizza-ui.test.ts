@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import pizzaUiExtension from "../../extensions/pizza-ui.ts";
+import pizzaUiExtension, {
+  maybeWarnAboutPiCompatibility,
+} from "../../extensions/pizza-ui.ts";
 
 const pkg = JSON.parse(
   readFileSync(resolve(__dirname, "..", "..", "package.json"), "utf-8"),
@@ -136,11 +138,15 @@ describe("pizza-ui extension", () => {
     await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
 
     const output = renderHeader(ctx);
+    expect(output).toContain("HOTKEYS");
+    expect(output).toContain("Shift+Tab");
+    expect(output).toContain("Alt+Enter");
     expect(output).toContain("interrupt");
     expect(output).toContain("suspend");
     expect(output).toContain("cycle thinking");
     expect(output).toContain("cycle models");
-    expect(output).toContain("expand tools");
+    expect(output).toContain("toggle tools");
+    expect(output).toContain("QUICK COMMANDS");
     expect(output).toContain("commands");
     expect(output).toContain("bash");
   });
@@ -164,10 +170,10 @@ describe("pizza-ui extension", () => {
     const ctx = createMockContext(true);
     await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
 
-    const output = renderHeader(ctx, 120);
+    const output = renderHeader(ctx, 140);
     const lines = output.split("\n");
-    // top border + padding + 10 content + padding + session meta + bottom border = 15
-    expect(lines.length).toBe(15);
+    // top border + padding + 11 content + padding + session meta + bottom border = 16
+    expect(lines.length).toBe(16);
 
     // Second line (after top border) should be empty padding (only borders + spaces)
     const paddingLine = stripAnsi(lines[1]);
@@ -266,8 +272,8 @@ describe("pizza-ui extension", () => {
 
     const output = renderHeader(ctx, 70);
     const lines = output.split("\n");
-    // stacked: top + padding + 10 left + separator + 10 right + padding + meta + bottom = 26
-    expect(lines.length).toBe(26);
+    // stacked: top + padding + 10 left + separator + 11 right + padding + meta + bottom = 27
+    expect(lines.length).toBe(27);
     expect(output).toContain("●");
     expect(output).toContain("interrupt");
     expect(output).toContain("New session");
@@ -284,6 +290,25 @@ describe("pizza-ui extension", () => {
     expect(ctx.ui.setHeader).not.toHaveBeenCalled();
   });
 
+  it("warns when Pi is outside Pizza's supported range", () => {
+    const ctx = createMockContext(true);
+
+    maybeWarnAboutPiCompatibility(ctx as any, "0.67.0");
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("expects Pi 0.66.x"),
+      "warning",
+    );
+  });
+
+  it("stays quiet when Pi is within Pizza's supported range", () => {
+    const ctx = createMockContext(true);
+
+    maybeWarnAboutPiCompatibility(ctx as any, "0.66.5");
+
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
+  });
+
   it("/pizza shows version, model, cwd, and context", async () => {
     const { api, registeredCommands } = createMockApi();
     pizzaUiExtension(api as any);
@@ -297,6 +322,8 @@ describe("pizza-ui extension", () => {
 
     const msg = ctx.ui.notify.mock.calls[0][0] as string;
     expect(msg).toContain(VERSION);
+    expect(msg).toContain("Pi:");
+    expect(msg).toContain("compatible with 0.66.x");
     expect(msg).toContain("sonnet");
     expect(msg).toContain("/home/user/project");
     expect(msg).toContain("15%");

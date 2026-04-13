@@ -9,6 +9,8 @@ curl -fsSL https://raw.githubusercontent.com/johnnygreco/pizza/main/install.sh |
 ```
 
 Requires Node.js >= 20.6 and Pi. Installs to `~/.pizza`.
+Each Pizza release declares the Pi range it supports. The installer enforces that
+range, and Pizza warns at session start if Pi is later upgraded past it.
 
 ```bash
 # Pin a specific version
