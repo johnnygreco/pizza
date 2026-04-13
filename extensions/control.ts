@@ -195,7 +195,7 @@ async function selectSummarizationModel(
 // Utilities
 // ============================================================================
 
-const STATUS_KEY = "session-control";
+const STATUS_KEY = "pizza.session";
 
 function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
 	return typeof error === "object" && error !== null && "code" in error;

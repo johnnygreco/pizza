@@ -150,7 +150,7 @@ export function getCompactionInstructions(mode: LoopMode, condition?: string): s
 function updateStatus(ctx: ExtensionContext, state: LoopStateData): void {
 	if (!ctx.hasUI) return;
 	if (!state.active || !state.mode) {
-		ctx.ui.setWidget("loop", undefined);
+		ctx.ui.setWidget("pizza.loop", undefined);
 		return;
 	}
 	const loopCount = state.loopCount ?? 0;
@@ -159,7 +159,7 @@ function updateStatus(ctx: ExtensionContext, state: LoopStateData): void {
 	const text = summary
 		? `Loop active: ${summary} ${turnText}`
 		: `Loop active ${turnText}`;
-	ctx.ui.setWidget("loop", [ctx.ui.theme.fg("accent", text)]);
+	ctx.ui.setWidget("pizza.loop", [ctx.ui.theme.fg("accent", text)]);
 }
 
 async function loadState(ctx: ExtensionContext): Promise<LoopStateData> {
