@@ -1,9 +1,13 @@
-.PHONY: release setup test typecheck
+.PHONY: help setup test test-install test-all typecheck release
 
 SUBAGENTS_REPO = https://github.com/HazAT/pi-interactive-subagents.git
 SUBAGENTS_COMMIT = bf4fb961c14567c949e010dca5ec01590b08289a
 
-setup:
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+
+setup: ## Clone subagents extension for local development
 	@if [ -d subagents ]; then \
 		echo "subagents/ already exists. To update: rm -rf subagents && make setup"; \
 	else \
@@ -12,13 +16,20 @@ setup:
 		echo "Subagents extension cloned to subagents/"; \
 	fi
 
-test:
+test: ## Run unit tests (vitest)
 	npm test
 
-typecheck:
+test-install: ## Run install.sh smoke tests
+	bash test/install.test.sh
+
+test-all: ## Run all tests (unit + install smoke tests)
+	npm test
+	bash test/install.test.sh
+
+typecheck: ## Run TypeScript type checking
 	npm run typecheck
 
-release:
+release: ## Tag and push a release (VERSION=x.y.z required)
 ifndef VERSION
 	$(error VERSION is required. Usage: make release VERSION=0.2.0)
 endif
@@ -33,9 +44,9 @@ endif
 		echo "Error: uncommitted changes detected. Commit or stash them first."; \
 		exit 1; \
 	fi
-	@# Run tests and typecheck
-	npm test
-	npm run typecheck
+	@# Run all tests and typecheck
+	$(MAKE) test-all
+	$(MAKE) typecheck
 	@# Check if tag already exists
 	@TAG="v$(VERSION)"; \
 	if git rev-parse "$$TAG" >/dev/null 2>&1; then \

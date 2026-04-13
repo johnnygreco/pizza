@@ -154,12 +154,6 @@ main() {
     # ── Install core extensions ──────────────────────────────────────────
     mkdir -p "$INSTALL_DIR"
 
-    # Preserve subagents if previously installed
-    HAS_EXISTING_SUBAGENTS=0
-    if [ -d "$INSTALL_DIR/subagents" ]; then
-        HAS_EXISTING_SUBAGENTS=1
-    fi
-
     rm -rf "$INSTALL_DIR/extensions" "$INSTALL_DIR/skills" "$INSTALL_DIR/prompts"
     cp -R "$EXTRACTED/extensions" "$INSTALL_DIR/extensions"
     cp -R "$EXTRACTED/skills" "$INSTALL_DIR/skills"
@@ -183,8 +177,15 @@ main() {
         success "Subagents extension installed"
     fi
 
+    # ── Handle stale subagents ───────────────────────────────────────────
+    if [ "$INSTALL_SUBAGENTS" -eq 0 ] && [ -d "$INSTALL_DIR/subagents" ]; then
+        warn "Existing subagents/ found but --with subagents not passed"
+        info "Removing stale subagents (reinstall with --with subagents to keep them)"
+        rm -rf "$INSTALL_DIR/subagents"
+    fi
+
     # ── Generate package.json ────────────────────────────────────────────
-    generate_package_json "$VERSION"
+    generate_package_json "$VERSION" "$INSTALL_SUBAGENTS"
 
     # ── Remove old npm installation ──────────────────────────────────────
     if command -v pi &>/dev/null; then
@@ -216,7 +217,7 @@ main() {
     echo "    - context"
     echo "    - todos"
     echo "    - control"
-    if [ -d "$INSTALL_DIR/subagents" ]; then
+    if [ "$INSTALL_SUBAGENTS" -eq 1 ]; then
         echo "    - subagents (/plan, /iterate)"
     fi
     echo ""
@@ -268,22 +269,25 @@ check_pi() {
             success "Pi v$PI_VERSION"
         else
             warn "Pi v$PI_VERSION found, but Pizza requires ~$REQUIRED_PI_MAJOR_MINOR.x"
-            printf "  Update Pi? [Y/n] "
             if [ -t 0 ]; then
+                printf "  Update Pi? [Y/n] "
                 read -r answer </dev/tty
+                case "$answer" in
+                    [nN]*)
+                        warn "Continuing with Pi v$PI_VERSION (may have compatibility issues)"
+                        ;;
+                    *)
+                        info "Updating Pi to ~$REQUIRED_PI_MAJOR_MINOR"
+                        npm install -g "@mariozechner/pi-coding-agent@~${REQUIRED_PI_MAJOR_MINOR}.0"
+                        success "Pi updated to v$(pi --version 2>&1)"
+                        ;;
+                esac
             else
-                answer="y"
+                error "Pi v$PI_VERSION is not compatible (requires ~$REQUIRED_PI_MAJOR_MINOR.x)"
+                echo "  Run manually to update:"
+                echo "    npm install -g @mariozechner/pi-coding-agent@~${REQUIRED_PI_MAJOR_MINOR}.0"
+                exit 1
             fi
-            case "$answer" in
-                [nN]*)
-                    warn "Continuing with Pi v$PI_VERSION (may have compatibility issues)"
-                    ;;
-                *)
-                    info "Updating Pi to ~$REQUIRED_PI_MAJOR_MINOR"
-                    npm install -g "@mariozechner/pi-coding-agent@~${REQUIRED_PI_MAJOR_MINOR}.0"
-                    success "Pi updated to v$(pi --version 2>&1)"
-                    ;;
-            esac
         fi
     else
         info "Pi is not installed"
@@ -294,23 +298,26 @@ check_pi() {
             exit 1
         fi
 
-        printf "  Install Pi? [Y/n] "
         if [ -t 0 ]; then
+            printf "  Install Pi? [Y/n] "
             read -r answer </dev/tty
+            case "$answer" in
+                [nN]*)
+                    warn "Skipping Pi installation. Pizza will be downloaded but not registered."
+                    warn "Install Pi later and run: pi install \${PIZZA_HOME:-$DEFAULT_INSTALL_DIR}"
+                    ;;
+                *)
+                    info "Installing Pi v~$REQUIRED_PI_MAJOR_MINOR"
+                    npm install -g "@mariozechner/pi-coding-agent@~${REQUIRED_PI_MAJOR_MINOR}.0"
+                    success "Pi v$(pi --version 2>&1) installed"
+                    ;;
+            esac
         else
-            answer="y"
+            warn "Pi is not installed. Pizza will be downloaded but not registered."
+            echo "  Run manually to install Pi and register Pizza:"
+            echo "    npm install -g @mariozechner/pi-coding-agent@~${REQUIRED_PI_MAJOR_MINOR}.0"
+            echo "    pi install \${PIZZA_HOME:-$DEFAULT_INSTALL_DIR}"
         fi
-        case "$answer" in
-            [nN]*)
-                warn "Skipping Pi installation. Pizza will be downloaded but not registered."
-                warn "Install Pi later and run: pi install \${PIZZA_HOME:-$DEFAULT_INSTALL_DIR}"
-                ;;
-            *)
-                info "Installing Pi v~$REQUIRED_PI_MAJOR_MINOR"
-                npm install -g "@mariozechner/pi-coding-agent@~${REQUIRED_PI_MAJOR_MINOR}.0"
-                success "Pi v$(pi --version 2>&1) installed"
-                ;;
-        esac
     fi
 }
 
@@ -328,11 +335,12 @@ resolve_latest_version() {
         return
     fi
 
-    # Fallback: git ls-remote
+    # Fallback: git ls-remote (exclude prerelease tags)
     if command -v git &>/dev/null; then
         version="$(git ls-remote --tags --refs "https://github.com/${REPO}.git" 2>/dev/null \
             | awk -F/ '{print $NF}' \
             | sed 's/^v//' \
+            | grep -v '-' \
             | sort -V \
             | tail -1 \
         )" || true
@@ -349,9 +357,10 @@ resolve_latest_version() {
 
 generate_package_json() {
     local version="$1"
+    local install_subagents="${2:-0}"
     local extensions='"extensions"'
 
-    if [ -d "$INSTALL_DIR/subagents" ]; then
+    if [ "$install_subagents" -eq 1 ]; then
         extensions='"extensions", "subagents"'
     fi
 

@@ -24,6 +24,8 @@
   },
   "scripts": {
     "test": "vitest run",
+    "test:install": "bash test/install.test.sh",
+    "test:all": "vitest run && bash test/install.test.sh",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
