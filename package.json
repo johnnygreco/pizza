@@ -1,6 +1,6 @@
 {
   "name": "pizza",
-  "version": "0.0.2-rc3",
+  "version": "0.0.2-rc4",
   "description": "Pizza — Pi with toppings",
   "type": "module",
   "license": "Apache-2.0",
