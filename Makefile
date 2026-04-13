@@ -55,10 +55,13 @@ endif
 		echo "  git tag -d $$TAG && git push origin :refs/tags/$$TAG"; \
 		exit 1; \
 	fi
-	@# Update version in package.json and commit
-	npm version $(VERSION) --no-git-tag-version
-	git add package.json package-lock.json
-	git commit -m "v$(VERSION)"
+	@# Update version in package.json and commit (skip if already correct)
+	@CURRENT=$$(node -p "require('./package.json').version"); \
+	if [ "$$CURRENT" != "$(VERSION)" ]; then \
+		npm version $(VERSION) --no-git-tag-version; \
+		git add package.json package-lock.json; \
+		git commit -m "v$(VERSION)"; \
+	fi
 	@# Create and push tag (CI creates the GitHub release)
 	git tag "v$(VERSION)"
 	git push origin main
