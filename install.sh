@@ -4,8 +4,8 @@ set -euo pipefail
 main() {
     # ── Constants ────────────────────────────────────────────────────────
     REPO="johnnygreco/pizza"
-    SUBAGENTS_REPO="HazAT/pi-interactive-subagents"
-    SUBAGENTS_COMMIT="bf4fb961c14567c949e010dca5ec01590b08289a"
+    SUBAGENTS_REPO="nicobailon/pi-subagents"
+    SUBAGENTS_COMMIT="9d1e88b2d9e48bc59503814fd443850341f74907"
     REQUIRED_PI_MAJOR_MINOR="0.66"
     DEFAULT_INSTALL_DIR="$HOME/.pizza"
 
@@ -169,7 +169,7 @@ main() {
     fi
 
     rm -rf "$INSTALL_DIR/subagents"
-    cp -R "$TMP_DIR/pi-interactive-subagents-${SUBAGENTS_COMMIT}" "$INSTALL_DIR/subagents"
+    cp -R "$TMP_DIR/pi-subagents-${SUBAGENTS_COMMIT}" "$INSTALL_DIR/subagents"
     success "Subagents extension installed"
 
     # ── Generate package.json ────────────────────────────────────────────

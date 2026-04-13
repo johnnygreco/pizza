@@ -1,7 +1,7 @@
 .PHONY: help setup test test-install test-all typecheck release
 
-SUBAGENTS_REPO = https://github.com/HazAT/pi-interactive-subagents.git
-SUBAGENTS_COMMIT = bf4fb961c14567c949e010dca5ec01590b08289a
+SUBAGENTS_REPO = https://github.com/nicobailon/pi-subagents.git
+SUBAGENTS_COMMIT = 9d1e88b2d9e48bc59503814fd443850341f74907
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \

@@ -47,7 +47,7 @@ pi --control-session mybot --send-session-message "status update?"
 
 ### Credits
 
-`/loop`, `/context`, `/todos`, and `--session-control` are from [mitsuhiko/agent-stuff](https://github.com/mitsuhiko/agent-stuff). `/plan` and `/iterate` are from [HazAT/pi-interactive-subagents](https://github.com/HazAT/pi-interactive-subagents).
+`/loop`, `/context`, `/todos`, and `--session-control` are from [mitsuhiko/agent-stuff](https://github.com/mitsuhiko/agent-stuff). `/plan` and `/iterate` are from [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents).
 
 ## 🛠️ Development
 

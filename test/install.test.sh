@@ -52,7 +52,7 @@ M
     tar -czf "$TEST_DIR/pizza.tar.gz" -C "$TEST_DIR/fixture" .
 
     # ── Subagents tarball fixture ─────────────────────────────────���─
-    local sa="$TEST_DIR/sa_fixture/pi-interactive-subagents-${SUBAGENTS_COMMIT}"
+    local sa="$TEST_DIR/sa_fixture/pi-subagents-${SUBAGENTS_COMMIT}"
     mkdir -p "$sa"
     echo '{}' > "$sa/package.json"
     tar -czf "$TEST_DIR/subagents.tar.gz" -C "$TEST_DIR/sa_fixture" .
@@ -61,7 +61,7 @@ M
     cat > "$TEST_DIR/bin/curl" << MOCK
 #!/usr/bin/env bash
 for arg in "\$@"; do
-    if [[ "\$arg" == *"pi-interactive-subagents"* ]]; then
+    if [[ "\$arg" == *"pi-subagents"* ]]; then
         cat "$TEST_DIR/subagents.tar.gz"
         exit 0
     fi
@@ -414,7 +414,7 @@ test_subagents_download_failure_exits() {
     cat > "$TEST_DIR/bin/curl" << MOCK
 #!/usr/bin/env bash
 for arg in "\$@"; do
-    if [[ "\$arg" == *"pi-interactive-subagents"* ]]; then
+    if [[ "\$arg" == *"pi-subagents"* ]]; then
         exit 1
     fi
 done
@@ -531,7 +531,7 @@ for arg in "\$@"; do
     if [[ "\$arg" == *"api.github.com"* ]]; then
         exit 1
     fi
-    if [[ "\$arg" == *"pi-interactive-subagents"* ]]; then
+    if [[ "\$arg" == *"pi-subagents"* ]]; then
         cat "$TEST_DIR/subagents.tar.gz"
         exit 0
     fi
