@@ -33,7 +33,7 @@ function createMockContext(
   hasUI = true,
   options: {
     cwd?: string;
-    model?: { id: string; name: string };
+    model?: { id: string; name: string; provider?: string };
     percent?: number | null;
     sessionName?: string;
     entries?: any[];
@@ -42,7 +42,7 @@ function createMockContext(
   return {
     hasUI,
     cwd: options.cwd ?? "/tmp/my-project",
-    model: options.model ?? { id: "claude-sonnet-4-20250514", name: "sonnet" },
+    model: options.model ?? { id: "claude-sonnet-4-20250514", name: "sonnet", provider: "anthropic" },
     getContextUsage: vi.fn(() =>
       options.percent !== undefined
         ? { tokens: 1000, contextWindow: 200000, percent: options.percent }
@@ -80,6 +80,8 @@ describe("pizza-ui extension", () => {
     pizzaUiExtension(api as any);
 
     expect(registeredEvents.has("session_start")).toBe(true);
+    expect(registeredEvents.has("turn_end")).toBe(true);
+    expect(registeredEvents.has("model_select")).toBe(true);
     expect(registeredCommands.has("pizza")).toBe(true);
   });
 
@@ -138,7 +140,7 @@ describe("pizza-ui extension", () => {
     await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
 
     const output = renderHeader(ctx);
-    expect(output).toContain("HOTKEYS");
+    expect(output).toContain("SHORTCUTS");
     expect(output).toContain("Shift+Tab");
     expect(output).toContain("Alt+Enter");
     expect(output).toContain("interrupt");
@@ -146,7 +148,7 @@ describe("pizza-ui extension", () => {
     expect(output).toContain("cycle thinking");
     expect(output).toContain("cycle models");
     expect(output).toContain("toggle tools");
-    expect(output).toContain("QUICK COMMANDS");
+    expect(output).toContain("PREFIXES");
     expect(output).toContain("commands");
     expect(output).toContain("bash");
   });
@@ -190,7 +192,7 @@ describe("pizza-ui extension", () => {
 
     const output = renderHeader(ctx);
     expect(output).toContain("New session");
-    expect(output).toContain("sonnet");
+    expect(output).toContain("Anthropic: sonnet");
   });
 
   it("shows 'Resumed' with session metadata for resumed session", async () => {
@@ -223,7 +225,51 @@ describe("pizza-ui extension", () => {
     expect(output).toContain("Resumed");
     expect(output).toContain('"auth-fix"');
     expect(output).toContain("2 msgs");
-    expect(output).toContain("sonnet");
+    expect(output).toContain("Anthropic: sonnet");
+  });
+
+  it("shows provider-aware labels in the banner and /pizza output", async () => {
+    const { api, registeredEvents, registeredCommands } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true, {
+      model: {
+        id: "anthropic/claude-opus-4.1",
+        name: "Anthropic: Claude Opus 4.1",
+        provider: "openrouter",
+      },
+    });
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+
+    const output = renderHeader(ctx);
+    expect(output).toContain("OpenRouter: Claude Opus 4.1");
+    expect(output).not.toContain("OpenRouter: Anthropic: Claude Opus 4.1");
+
+    await registeredCommands.get("pizza").handler("", ctx);
+    const msg = ctx.ui.notify.mock.calls.at(-1)![0] as string;
+    expect(msg).toContain("Model: OpenRouter: Claude Opus 4.1");
+  });
+
+  it("updates the banner when the model changes", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true, {
+      model: { id: "claude-sonnet-4-20250514", name: "sonnet", provider: "anthropic" },
+    });
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+    expect(renderHeader(ctx)).toContain("Anthropic: sonnet");
+
+    ctx.model = {
+      id: "anthropic/claude-opus-4.6",
+      name: "Anthropic: Claude Opus 4.6",
+      provider: "openrouter",
+    };
+    await registeredEvents.get("model_select")![0]({}, ctx);
+
+    const output = renderHeader(ctx);
+    expect(output).toContain("OpenRouter: Claude Opus 4.6");
+    expect(output).not.toContain("Anthropic: sonnet");
   });
 
   it("shows topic from first user message when no session name", async () => {
@@ -315,7 +361,7 @@ describe("pizza-ui extension", () => {
 
     const ctx = createMockContext(true, {
       cwd: "/home/user/project",
-      model: { id: "claude-sonnet-4-20250514", name: "sonnet" },
+      model: { id: "claude-sonnet-4-20250514", name: "sonnet", provider: "anthropic" },
       percent: 15,
     });
     await registeredCommands.get("pizza").handler("", ctx);
@@ -324,7 +370,7 @@ describe("pizza-ui extension", () => {
     expect(msg).toContain(VERSION);
     expect(msg).toContain("Pi:");
     expect(msg).toContain("compatible with 0.67.x");
-    expect(msg).toContain("sonnet");
+    expect(msg).toContain("Anthropic: sonnet");
     expect(msg).toContain("/home/user/project");
     expect(msg).toContain("15%");
   });

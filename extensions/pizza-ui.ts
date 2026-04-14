@@ -6,6 +6,7 @@ import {
   getPiCompatibilitySummary,
   getPiCompatibilityWarning,
 } from "./shared/pi-compat.ts";
+import { formatModelLabel } from "./shared/model-label.ts";
 
 const VERSION = PIZZA_VERSION;
 
@@ -34,11 +35,11 @@ const fg = (n: number) => `\x1b[38;5;${n}m`;
 const bg = (n: number) => `\x1b[48;5;${n}m`;
 const BG_OFF = "\x1b[49m";
 
-const CRUST = fg(179);
+const CRUST = "\x1b[38;2;195;160;75m";
 const CHEESE_BG = bg(229);
 const PEP = fg(160);
 const PEPPER = fg(64);
-const DRIP = fg(223);
+const DRIP = fg(222);
 const SAUCE = fg(130);
 const CLR_P = B + fg(223);
 const CLR_I = B + fg(221);
@@ -65,7 +66,7 @@ function colorizePizza(line: string): string {
     else if (ch === "░") { clr = SAUCE; wantBg = true; }
     else if (ch === "●") { clr = PEP; wantBg = true; }
     else if ("▬▮".includes(ch)) { clr = PEPPER; wantBg = true; }
-    else if ("╽┃│╷╵".includes(ch)) clr = DRIP;
+    else if ("╽┃│╷╵▁▂▃".includes(ch)) clr = DRIP;
     else {
       if (bgOn) { out += BG_OFF; bgOn = false; }
       out += ch;
@@ -104,6 +105,13 @@ interface SessionMeta {
   topic?: string;
 }
 
+type HeaderState = {
+  header: PizzaHeader;
+  reason: string;
+};
+
+const HEADER_STATES = new WeakMap<object, HeaderState>();
+
 function relativeTime(date: Date): string {
   const diff = Date.now() - date.getTime();
   const secs = Math.floor(diff / 1000);
@@ -135,7 +143,7 @@ function truncate(s: string, maxLen: number): string {
 
 function extractSessionMeta(event: any, ctx: any): SessionMeta {
   const entries: any[] = ctx.sessionManager?.getEntries?.() ?? [];
-  const model = ctx.model?.name ?? ctx.model?.id ?? "default";
+  const model = formatModelLabel(ctx.model) ?? "default";
   const name = ctx.sessionManager?.getSessionName?.();
 
   const msgEntries = entries.filter((e: any) => e.type === "message");
@@ -195,15 +203,15 @@ function formatSessionMeta(meta: SessionMeta): string {
 
 const PIZZA_ART = [
   "        ▄████████████▄     ", //  0  crust top
-  "       █░░░░●░░░░░●░░░█    ", //  1
-  "      █░░●░░░░░▮░░░░●░░█   ", //  2  ─┐
-  "     █░░░░▬░░░●░░░░░░░●░█  ", //  3   │
-  "     █░░●░░░░▮░░░●░░▬░░░█  ", //  4   │ text
-  "      █░░░░●░░░░░▬░░░●░█   ", //  5  ─┘
-  "       █░░░▮░░░●░░░░░░█    ", //  6
+  "       ██░░░●░░░░░●░░██    ", //  1
+  "      ██░●░░░░░▮░░░░●░██   ", //  2  ─┐
+  "     ██░░░▬░░░●░░░░░░░●██  ", //  3   │
+  "     ██░●░░░░▮░░░●░░▬░░██  ", //  4   │ text
+  "      ██░░░●░░░░░▬░░░●██   ", //  5  ─┘
+  "       ██░░▮░░░●░░░░░██    ", //  6
   "        ▀████████████▀     ", //  7  crust bottom + tagline
-  "          ╷   ┃╷   ╽       ", //  8  drips
-  "              ╵            ", //  9
+  "            ╷┃╷  ╽ ╷       ", //  8  drips
+  "         ╵  ┃╵  │          ", //  9  drips
 ];
 
 const PIZZA_LETTERS: { lines: string[]; clr: string }[] = [
@@ -306,7 +314,7 @@ function buildRightColumn(): string[] {
   const rdW = Math.max(...SHORTCUTS.map((s) => s[3].length));
   const rowW = lkW + 1 + ldW + 3 + rkW + 1 + rdW;
 
-  const lines: string[] = [buildSectionRule(rowW, "hotkeys")];
+  const lines: string[] = [buildSectionRule(rowW, "shortcuts")];
   for (const [lk, ld, rk, rd] of SHORTCUTS) {
     lines.push(
       KEY_CLR + lk.padEnd(lkW) + R + " " +
@@ -317,7 +325,7 @@ function buildRightColumn(): string[] {
   }
 
   // Separator
-  lines.push(buildSectionRule(rowW, "quick commands"));
+  lines.push(buildSectionRule(rowW, "prefixes"));
 
   // Commands
   lines.push(buildCommandsLine(rowW));
@@ -465,6 +473,33 @@ class PizzaHeader {
   invalidate(): void {
     this.cache = undefined;
   }
+
+  update(meta: SessionMeta): void {
+    this.meta = meta;
+    this.invalidate();
+  }
+}
+
+function setOrUpdateHeader(ctx: any, reason?: string): void {
+  if (!ctx?.hasUI) return;
+
+  const sessionManager = ctx.sessionManager as object | undefined;
+  if (!sessionManager) return;
+
+  const existing = HEADER_STATES.get(sessionManager);
+  const effectiveReason = reason ?? existing?.reason ?? "startup";
+  const meta = extractSessionMeta({ reason: effectiveReason }, ctx);
+
+  if (existing) {
+    existing.reason = effectiveReason;
+    existing.header.update(meta);
+    ctx.ui.setHeader((_tui: unknown, _theme: unknown) => existing.header);
+    return;
+  }
+
+  const header = new PizzaHeader(meta);
+  HEADER_STATES.set(sessionManager, { header, reason: effectiveReason });
+  ctx.ui.setHeader((_tui: unknown, _theme: unknown) => header);
 }
 
 // ── Extension entry point ────────────────────────────────────
@@ -474,14 +509,21 @@ export default function pizzaUiExtension(pi: ExtensionAPI): void {
     if (!ctx.hasUI) return;
 
     ctx.ui.setTitle(`pizza \u00B7 ${basename(ctx.cwd)}`);
-    const meta = extractSessionMeta(event, ctx);
-    ctx.ui.setHeader((_tui, _theme) => new PizzaHeader(meta));
+    setOrUpdateHeader(ctx, event?.reason);
+  });
+
+  pi.on("turn_end", async (_event, ctx) => {
+    setOrUpdateHeader(ctx);
+  });
+
+  pi.on("model_select", async (_event, ctx) => {
+    setOrUpdateHeader(ctx);
   });
 
   pi.registerCommand("pizza", {
     description: "Show Pizza configuration and status",
     handler: async (_args, ctx) => {
-      const model = ctx.model?.name ?? ctx.model?.id ?? "default";
+      const model = formatModelLabel(ctx.model) ?? "default";
       const usage = ctx.getContextUsage();
       const lines = [
         `\u{1F355} pizza v${VERSION}`,
