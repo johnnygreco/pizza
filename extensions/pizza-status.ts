@@ -126,13 +126,7 @@ function getSessionUsage(ctx: ExtensionContext): {
 	return { input, output, cacheRead, cacheWrite, totalCost };
 }
 
-function fillColor(index: number): string {
-	if (index >= 9) return PEP;
-	if (index >= 5) return GOLD;
-	return PEPPER;
-}
-
-function accentForPercent(percent: number): string {
+function colorForPercent(percent: number): string {
 	if (percent >= 90) return PEP;
 	if (percent >= 70) return GOLD;
 	return PEPPER;
@@ -140,16 +134,17 @@ function accentForPercent(percent: number): string {
 
 function buildProgressBar(percent: number): string {
 	const filled = Math.floor((percent / 100) * METER_WIDTH);
+	const color = colorForPercent(percent);
 	let bar = "";
 	for (let i = 0; i < METER_WIDTH; i++) {
-		bar += i < filled ? `${fillColor(i)}\u2588${R}` : `${DIM}\u2591${R}`;
+		bar += i < filled ? `${color}\u2588${R}` : `${color}\u2591${R}`;
 	}
 	return bar;
 }
 
 function buildStatusLine(contextDisplay: string, percent: number, model?: string): string {
 	const marquee = "🍕";
-	const percentText = `${B}${accentForPercent(percent)}${contextDisplay}${R}`;
+	const percentText = `${B}${colorForPercent(percent)}${contextDisplay}${R}`;
 	const modelText = model ? `${MARQUEE}${model}${R}` : "";
 	const divider = `${DIM} \u00b7 ${R}`;
 
