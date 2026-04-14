@@ -16,9 +16,9 @@ const R = "\x1b[0m";
 const B = "\x1b[1m";
 const fg = (n: number) => `\x1b[38;5;${n}m`;
 
-const PEP = fg(160);
-const PEPPER = fg(64);
-const GOLD = fg(179);
+const PEP = "\x1b[31m";
+const PEPPER = "\x1b[32m";
+const GOLD = "\x1b[33m";
 const MARQUEE = fg(180);
 const DIM = fg(94);
 
