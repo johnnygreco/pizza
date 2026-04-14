@@ -9,14 +9,13 @@ import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { formatModelLabel } from "./shared/model-label.ts";
 
 const STATUS_KEY = "pizza.status";
-const METER_WIDTH = 12;
+const METER_WIDTH = 20;
 const AUTO_CONTEXT_SUFFIX = " (auto)";
 
 const R = "\x1b[0m";
 const B = "\x1b[1m";
 const fg = (n: number) => `\x1b[38;5;${n}m`;
 
-const CRUST = fg(130);
 const PEP = fg(160);
 const PEPPER = fg(64);
 const GOLD = fg(179);
@@ -141,11 +140,10 @@ function accentForPercent(percent: number): string {
 
 function buildProgressBar(percent: number): string {
 	const filled = Math.floor((percent / 100) * METER_WIDTH);
-	let bar = `${CRUST}\u2595${R}`;
+	let bar = "";
 	for (let i = 0; i < METER_WIDTH; i++) {
 		bar += i < filled ? `${fillColor(i)}\u2588${R}` : `${DIM}\u2591${R}`;
 	}
-	bar += `${CRUST}\u258F${R}`;
 	return bar;
 }
 
