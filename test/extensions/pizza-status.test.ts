@@ -20,7 +20,13 @@ function createMockContext(
   hasUI = true,
   options: {
     cwd?: string;
-    model?: { id: string; name?: string; provider?: string; contextWindow?: number };
+    model?: {
+      id: string;
+      name?: string;
+      provider?: string;
+      contextWindow?: number;
+      cost?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+    };
     percent?: number | null;
     contextWindow?: number;
     sessionName?: string;
@@ -36,6 +42,12 @@ function createMockContext(
       name: "sonnet",
       provider: "openrouter",
       contextWindow: 200000,
+      cost: {
+        input: 1.25,
+        output: 10,
+        cacheRead: 0,
+        cacheWrite: 0,
+      },
     },
     getContextUsage: vi.fn(() =>
       options.percent !== undefined
@@ -103,7 +115,7 @@ describe("pizza-status extension", () => {
     pizzaStatusExtension(api as any);
 
     const ctx = createMockContext(true, {
-      model: { id: "gpt-5.4", name: "sonnet" },
+      model: { id: "gpt-5.4", name: "sonnet", provider: "anthropic" },
       percent: 50,
     });
     await registeredEvents.get("session_start")![0]({}, ctx);
@@ -114,7 +126,7 @@ describe("pizza-status extension", () => {
     expect(output).toContain("🍕 ▕██████░░░░░░▏");
     expect(output).toContain("▕██████░░░░░░▏");
     expect(output).toContain("50.0%/200k (auto)");
-    expect(output).toContain("sonnet");
+    expect(output).toContain("Anthropic: sonnet");
     expect(output).not.toContain("lunch rush");
   });
 
@@ -162,6 +174,12 @@ describe("pizza-status extension", () => {
         name: "Qwen3 Coder",
         provider: "openrouter",
         contextWindow: 262000,
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+        },
       },
       contextWindow: 262000,
     });
@@ -183,19 +201,19 @@ describe("pizza-status extension", () => {
 
     expect(ctx.ui.setFooter).toHaveBeenCalledWith(expect.any(Function));
     expect(footerLines[0]).toContain("/tmp/pizza-shop (main) • late-night");
+    expect(footerLines[0]).toContain("↑1.5k");
+    expect(footerLines[0]).toContain("↓2.2k");
+    expect(footerLines[0]).toContain("R300");
+    expect(footerLines[0]).toContain("$0.0250");
     expect(footerLines[1]).toBe("");
-    expect(footer).toContain("↑1.5k");
-    expect(footer).toContain("↓2.2k");
-    expect(footer).toContain("R300");
-    expect(footer).toContain("$0.0250");
     expect(footer).not.toContain("qwen/qwen3-coder:free");
     expect(footerLines[1]).not.toContain("50.0%/262k (auto)");
     expect(footer).toContain("🍕");
     expect(footer).toContain("50.0%/262k (auto)");
-    expect(footer).toContain("Qwen3 Coder");
+    expect(footer).toContain("OpenRouter: Qwen3 Coder");
   });
 
-  it("omits the upper stats line until usage or cost exists", async () => {
+  it("shows a zero-cost upper stats line even before usage exists", async () => {
     const { api, registeredEvents } = createMockApi();
     pizzaStatusExtension(api as any);
 
@@ -203,12 +221,18 @@ describe("pizza-status extension", () => {
       cwd: "/tmp/pizza-shop",
       percent: 0,
       model: {
-        id: "qwen/qwen3-coder:free",
-        name: "Qwen3 Coder",
+        id: "anthropic/claude-opus-4.6",
+        name: "Anthropic: Claude Opus 4.6",
         provider: "openrouter",
-        contextWindow: 262000,
+        contextWindow: 1000000,
+        cost: {
+          input: 15,
+          output: 75,
+          cacheRead: 1.5,
+          cacheWrite: 18.75,
+        },
       },
-      contextWindow: 262000,
+      contextWindow: 1000000,
     });
 
     await registeredEvents.get("session_start")![0]({}, ctx);
@@ -228,9 +252,12 @@ describe("pizza-status extension", () => {
 
     expect(footerLines).toHaveLength(3);
     expect(footerLines[0]).toContain("/tmp/pizza-shop");
+    expect(footerLines[0]).toContain("$0.00");
+    expect(footerLines[0]).toContain("↑$15/1M");
+    expect(footerLines[0]).toContain("↓$75/1M");
     expect(footerLines[1]).toBe("");
-    expect(footer).not.toContain("qwen/qwen3-coder:free");
-    expect(footer).toContain("Qwen3 Coder");
+    expect(footer).not.toContain("anthropic/claude-opus-4.6");
+    expect(footer).toContain("OpenRouter: Claude Opus 4.6");
   });
 
   it("skips status updates when no UI is available", async () => {
@@ -242,5 +269,30 @@ describe("pizza-status extension", () => {
 
     expect(ctx.ui.setStatus).not.toHaveBeenCalled();
     expect(ctx.ui.setFooter).not.toHaveBeenCalled();
+  });
+
+  it("prefers the real provider label over vendor-prefixed model names", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaStatusExtension(api as any);
+
+    const ctx = createMockContext(true, {
+      model: {
+        id: "anthropic/claude-opus-4.1",
+        name: "Anthropic: Claude Opus 4.1",
+        provider: "openrouter",
+        contextWindow: 1000000,
+      },
+      percent: 0,
+      contextWindow: 1000000,
+    });
+
+    await registeredEvents.get("session_start")![0]({}, ctx);
+
+    const [, raw] = ctx.ui.setStatus.mock.calls[0];
+    const output = stripAnsi(raw);
+
+    expect(output).toContain("0.0%/1.0M (auto)");
+    expect(output).toContain("OpenRouter: Claude Opus 4.1");
+    expect(output).not.toContain("Anthropic: Claude Opus 4.1");
   });
 });

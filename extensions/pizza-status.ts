@@ -6,6 +6,7 @@
 
 import type { ExtensionAPI, ExtensionContext, ReadonlyFooterDataProvider } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { formatModelLabel } from "./shared/model-label.ts";
 
 const STATUS_KEY = "pizza.status";
 const METER_WIDTH = 12;
@@ -50,11 +51,34 @@ function formatUsd(cost: number): string {
 	return `$${cost.toFixed(4)}`;
 }
 
+function trimTrailingZeros(text: string): string {
+	return text.replace(/(\.\d*?[1-9])0+$/u, "$1").replace(/\.0+$/u, "");
+}
+
+function formatUsdRate(cost: number): string {
+	if (!Number.isFinite(cost) || cost <= 0) return "$0";
+	return `$${trimTrailingZeros(cost.toFixed(4))}`;
+}
+
 function extractCostTotal(usage: any): number {
 	if (!usage) return 0;
 	const direct = numberOrZero(usage.cost);
 	if (direct > 0) return direct;
 	return numberOrZero(usage?.cost?.total);
+}
+
+function getModelRateText(ctx: ExtensionContext): string | undefined {
+	const modelCost = (ctx.model as any)?.cost;
+	if (!modelCost) return undefined;
+
+	const input = numberOrZero(modelCost.input);
+	const output = numberOrZero(modelCost.output);
+	const parts: string[] = [];
+
+	if (input > 0) parts.push(`↑${formatUsdRate(input)}/1M`);
+	if (output > 0) parts.push(`↓${formatUsdRate(output)}/1M`);
+
+	return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
 function sanitizeStatusText(text: string): string {
@@ -138,6 +162,25 @@ function buildStatusLine(contextDisplay: string, percent: number, model?: string
 	return line;
 }
 
+function buildStatsText(ctx: ExtensionContext): string {
+	const usage = getSessionUsage(ctx);
+	const parts: string[] = [];
+	if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
+	if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
+	if (usage.cacheRead) parts.push(`R${formatTokens(usage.cacheRead)}`);
+	if (usage.cacheWrite) parts.push(`W${formatTokens(usage.cacheWrite)}`);
+
+	const usingSubscription = ctx.model ? ctx.modelRegistry.isUsingOAuth(ctx.model) : false;
+	parts.push(`${formatUsd(usage.totalCost)}${usingSubscription ? " (sub)" : ""}`);
+
+	const modelRate = getModelRateText(ctx);
+	if (modelRate) {
+		parts.push(`· ${modelRate}`);
+	}
+
+	return parts.join(" ");
+}
+
 function buildPwdLine(ctx: ExtensionContext, width: number, theme: FooterTheme, footerData: ReadonlyFooterDataProvider): string {
 	let pwd = ctx.cwd;
 	const home = process.env.HOME || process.env.USERPROFILE;
@@ -155,34 +198,30 @@ function buildPwdLine(ctx: ExtensionContext, width: number, theme: FooterTheme, 
 		pwd += ` • ${sessionName}`;
 	}
 
-	return truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "..."));
-}
-
-function buildStatsLine(ctx: ExtensionContext, width: number, theme: FooterTheme): string {
-	const usage = getSessionUsage(ctx);
-	const leftParts: string[] = [];
-	if (usage.input) leftParts.push(`↑${formatTokens(usage.input)}`);
-	if (usage.output) leftParts.push(`↓${formatTokens(usage.output)}`);
-	if (usage.cacheRead) leftParts.push(`R${formatTokens(usage.cacheRead)}`);
-	if (usage.cacheWrite) leftParts.push(`W${formatTokens(usage.cacheWrite)}`);
-
-	const usingSubscription = ctx.model ? ctx.modelRegistry.isUsingOAuth(ctx.model) : false;
-	if (usage.totalCost > 0 || usingSubscription) {
-		leftParts.push(`${formatUsd(usage.totalCost)}${usingSubscription ? " (sub)" : ""}`);
+	const stats = buildStatsText(ctx);
+	if (!stats) {
+		return truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "..."));
 	}
 
-	if (leftParts.length === 0) {
-		return "";
+	const statsWidth = visibleWidth(stats);
+	if (statsWidth >= width) {
+		return theme.fg("dim", truncateToWidth(stats, width, "..."));
 	}
 
-	let left = leftParts.join(" ");
-	let leftWidth = visibleWidth(left);
-	if (leftWidth > width) {
-		left = truncateToWidth(left, width, "...");
-		leftWidth = visibleWidth(left);
+	const pwdWidth = visibleWidth(pwd);
+	if (pwdWidth + 1 + statsWidth <= width) {
+		const gap = " ".repeat(width - pwdWidth - statsWidth);
+		return theme.fg("dim", pwd) + gap + theme.fg("dim", stats);
 	}
 
-	return theme.fg("dim", left);
+	const maxPwdWidth = Math.max(0, width - statsWidth - 1);
+	if (maxPwdWidth <= 0) {
+		return theme.fg("dim", truncateToWidth(stats, width, "..."));
+	}
+
+	const truncatedPwd = truncateToWidth(pwd, maxPwdWidth, "...");
+	const gap = " ".repeat(Math.max(1, width - visibleWidth(truncatedPwd) - statsWidth));
+	return theme.fg("dim", truncatedPwd) + gap + theme.fg("dim", stats);
 }
 
 function buildFooterLines(
@@ -193,10 +232,6 @@ function buildFooterLines(
 ): string[] {
 	const lines = [buildPwdLine(ctx, width, theme, footerData)];
 	const lowerLines: string[] = [];
-	const statsLine = buildStatsLine(ctx, width, theme);
-	if (statsLine) {
-		lowerLines.push(statsLine);
-	}
 	const extensionStatuses = footerData.getExtensionStatuses();
 	if (extensionStatuses.size > 0) {
 		const statusLine = Array.from(extensionStatuses.entries())
@@ -227,7 +262,7 @@ function installFooter(ctx: ExtensionContext): void {
 
 function updateStatus(ctx: ExtensionContext): void {
 	if (!ctx.hasUI) return;
-	const model = ctx.model?.name ?? ctx.model?.id;
+	const model = formatModelLabel(ctx.model);
 	const { display, percent } = getContextDisplay(ctx);
 	ctx.ui.setStatus(STATUS_KEY, buildStatusLine(display, percent, model));
 }
