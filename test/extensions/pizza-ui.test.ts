@@ -15,7 +15,11 @@ const pkg = JSON.parse(
 );
 const VERSION: string = pkg.version;
 
-function createMockApi() {
+function createMockApi(
+  options: {
+    commands?: Array<{ name: string; source: "skill" | "prompt" | "extension" }>;
+  } = {},
+) {
   const registeredEvents = new Map<string, Function[]>();
   const registeredCommands = new Map<string, any>();
 
@@ -29,6 +33,7 @@ function createMockApi() {
     registerCommand: vi.fn((name: string, options: any) => {
       registeredCommands.set(name, options);
     }),
+    getCommands: vi.fn(() => options.commands ?? []),
   };
 
   return { api, registeredEvents, registeredCommands };
@@ -119,10 +124,10 @@ describe("pizza-ui extension", () => {
     expect(output).toContain("╰");
     // tagline
     expect(output).toContain("Pi ");
-    expect(output).toContain("with toppings");
+    expect(output).toContain("with extra toppings");
   });
 
-  it("banner contains pizza art with toppings and cheese drips", async () => {
+  it("banner contains pizza art with extra toppings and cheese drips", async () => {
     const { api, registeredEvents } = createMockApi();
     pizzaUiExtension(api as any);
 
@@ -179,8 +184,9 @@ describe("pizza-ui extension", () => {
 
     const output = renderHeader(ctx, 140);
     const lines = output.split("\n");
-    // top border + padding + 11 content + padding + session meta + bottom border = 16
-    expect(lines.length).toBe(16);
+    // top border + padding + 11 content + padding + resources (1) + padding +
+    // session meta + bottom border = 18
+    expect(lines.length).toBe(18);
 
     // Second line (after top border) should be empty padding (only borders + spaces)
     const paddingLine = stripAnsi(lines[1]);
@@ -358,8 +364,9 @@ describe("pizza-ui extension", () => {
 
     const output = renderHeader(ctx, 70);
     const lines = output.split("\n");
-    // stacked: top + padding + 10 left + separator + 11 right + padding + meta + bottom = 27
-    expect(lines.length).toBe(27);
+    // stacked: top + padding + 10 left + separator + 11 right + padding +
+    // resources (1) + padding + meta + bottom = 29
+    expect(lines.length).toBe(29);
     expect(output).toContain("●");
     expect(output).toContain("interrupt");
     expect(output).toContain("New session");
@@ -610,5 +617,120 @@ describe("/pizza theme subcommand", () => {
 
     const msg = ctx.ui.notify.mock.calls.at(-1)![0] as string;
     expect(msg).toContain("Theme: cyberpunk-pizzeria");
+  });
+});
+
+const RESOURCE_COMMANDS: Array<{ name: string; source: "skill" | "prompt" | "extension" }> = [
+  { name: "skill:alpha", source: "skill" },
+  { name: "skill:beta", source: "skill" },
+  { name: "hello", source: "prompt" },
+  { name: "todo", source: "extension" },
+  { name: "pizza", source: "extension" },
+];
+
+function withThemesSurface(ctx: ReturnType<typeof createMockContext>) {
+  (ctx.ui as any).getAllThemes = vi.fn(() => [
+    { name: "retro-pizzeria", path: "/themes/retro.json" },
+    { name: "cyberpunk-pizzeria", path: "/themes/cyber.json" },
+  ]);
+  return ctx;
+}
+
+describe("/pizza resources subcommand", () => {
+  afterEach(async () => {
+    // Reset module-level expansion flag to collapsed.
+    const { api, registeredCommands } = createMockApi({ commands: [] });
+    pizzaUiExtension(api as any);
+    const ctx = withThemesSurface(createMockContext(true));
+    await registeredCommands.get("pizza").handler("resources collapse", ctx);
+  });
+
+  it("renders a collapsed resources row with category counts by default", async () => {
+    const { api, registeredEvents } = createMockApi({ commands: RESOURCE_COMMANDS });
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemesSurface(createMockContext(true));
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+
+    const output = stripAnsi(renderHeader(ctx, 140));
+    expect(output).toContain("▸ resources");
+    expect(output).toContain("skills 2");
+    expect(output).toContain("prompts 1");
+    expect(output).toContain("ext 2");
+    expect(output).toContain("themes 2");
+    expect(output).toContain("(/pizza resources)");
+    // Collapsed form: resource names should not be listed.
+    expect(output).not.toContain("alpha");
+  });
+
+  it("/pizza resources toggles to expanded and lists names per category", async () => {
+    const { api, registeredEvents, registeredCommands } = createMockApi({
+      commands: RESOURCE_COMMANDS,
+    });
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemesSurface(createMockContext(true));
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+    await registeredCommands.get("pizza").handler("resources", ctx);
+
+    const output = stripAnsi(renderHeader(ctx, 140));
+    expect(output).toContain("▾ resources");
+    expect(output).toContain("skills:");
+    expect(output).toContain("alpha");
+    expect(output).toContain("beta");
+    expect(output).not.toContain("skill:alpha");
+    expect(output).toContain("hello");
+    expect(output).toContain("todo");
+    expect(output).toContain("retro-pizzeria");
+
+    const last = ctx.ui.notify.mock.calls.at(-1)!;
+    expect(last[0]).toBe("Resources expanded");
+  });
+
+  it("/pizza resources collapse returns to the compact form", async () => {
+    const { api, registeredEvents, registeredCommands } = createMockApi({
+      commands: RESOURCE_COMMANDS,
+    });
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemesSurface(createMockContext(true));
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+    await registeredCommands.get("pizza").handler("resources expand", ctx);
+    await registeredCommands.get("pizza").handler("resources collapse", ctx);
+
+    const output = stripAnsi(renderHeader(ctx, 140));
+    expect(output).toContain("▸ resources");
+    expect(output).not.toContain("alpha");
+  });
+
+  it("wraps expanded resource lists that overflow the banner width", async () => {
+    const manyPrompts = Array.from({ length: 20 }, (_, i) => `prompt-name-${i}`);
+    const manyThemes = Array.from({ length: 15 }, (_, i) => `theme-name-${i}`);
+    const commands = manyPrompts.map(
+      (name): { name: string; source: "prompt" } => ({ name, source: "prompt" }),
+    );
+
+    const { api, registeredEvents, registeredCommands } = createMockApi({
+      commands,
+    });
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true);
+    (ctx.ui as any).getAllThemes = vi.fn(() =>
+      manyThemes.map((name) => ({ name, path: `/themes/${name}.json` })),
+    );
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+    await registeredCommands.get("pizza").handler("resources expand", ctx);
+
+    const width = 100;
+    const output = renderHeader(ctx, width);
+    const stripped = stripAnsi(output);
+
+    for (const name of manyPrompts) expect(stripped).toContain(name);
+    for (const name of manyThemes) expect(stripped).toContain(name);
+
+    for (const line of output.split("\n")) {
+      expect(stripAnsi(line).length).toBeLessThanOrEqual(width);
+    }
   });
 });

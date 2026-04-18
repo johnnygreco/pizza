@@ -1,6 +1,6 @@
 # 🍕 Pizza
 
-**Pi with toppings** — my opinionated [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) setup, packaged as a set of extensions.
+**Pi with extra toppings** — my opinionated [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) setup, packaged as a set of extensions.
 
 ## 📦 Install
 

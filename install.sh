@@ -181,6 +181,9 @@ main() {
     # ── Symlink themes into ~/.pi/agent/themes/ ──────────────────────────
     link_themes
 
+    # ── Apply pi settings pizza depends on (quietStartup) ────────────────
+    apply_pi_settings
+
     # ── Generate package.json ────────────────────────────────────────────
     generate_package_json "$VERSION" "$PI_COMPATIBILITY_RANGE"
 
@@ -228,9 +231,9 @@ unlink_agents() {
     fi
 }
 
-# Resolve pi's custom themes directory, honoring *_CODING_AGENT_DIR env vars the
-# same way pi's config.ts does. Falls back to ~/.pi/agent/themes.
-pi_themes_dir() {
+# Resolve pi's agent directory, honoring *_CODING_AGENT_DIR env vars the same
+# way pi's config.ts does. Falls back to ~/.pi/agent.
+pi_agent_dir() {
     local agent_dir=""
     if [ -n "${PI_CODING_AGENT_DIR:-}" ]; then
         agent_dir="$PI_CODING_AGENT_DIR"
@@ -260,7 +263,134 @@ pi_themes_dir() {
         "~/"*) agent_dir="$HOME/${agent_dir#~/}" ;;
     esac
 
-    echo "$agent_dir/themes"
+    echo "$agent_dir"
+}
+
+pi_themes_dir() {
+    echo "$(pi_agent_dir)/themes"
+}
+
+pi_settings_file() {
+    echo "$(pi_agent_dir)/settings.json"
+}
+
+settings_backup_file() {
+    echo "$INSTALL_DIR/.pi-settings.backup.json"
+}
+
+# Set pi-side overrides that pizza relies on (currently just quietStartup, so
+# pi's `[Skills]/[Extensions]/[Themes]` boot listing stays suppressed — pizza's
+# banner shows a collapsible equivalent). Original values are backed up so
+# uninstall can restore exactly what was there.
+apply_pi_settings() {
+    local settings_file backup_file
+    settings_file="$(pi_settings_file)"
+    backup_file="$(settings_backup_file)"
+
+    mkdir -p "$(dirname "$settings_file")"
+
+    if ! node -e '
+const fs = require("node:fs");
+const [settingsPath, backupPath] = process.argv.slice(1);
+const overrides = { quietStartup: true };
+
+const existedBefore = fs.existsSync(settingsPath);
+let settings = {};
+if (existedBefore) {
+    try {
+        const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            settings = parsed;
+        }
+    } catch (err) {
+        console.error(`Failed to parse ${settingsPath}: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// Only write the backup once, so reinstall does not overwrite the true
+// pre-pizza state with pizza-managed values.
+if (!fs.existsSync(backupPath)) {
+    const keys = {};
+    for (const key of Object.keys(overrides)) {
+        keys[key] = Object.prototype.hasOwnProperty.call(settings, key)
+            ? { present: true, value: settings[key] }
+            : { present: false };
+    }
+    fs.writeFileSync(backupPath, JSON.stringify({ existedBefore, keys }, null, 2) + "\n");
+}
+
+let changed = !existedBefore;
+for (const [key, value] of Object.entries(overrides)) {
+    if (settings[key] !== value) {
+        settings[key] = value;
+        changed = true;
+    }
+}
+if (changed) {
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+}
+' "$settings_file" "$backup_file"; then
+        error "Failed to update $settings_file"
+        exit 1
+    fi
+
+    success "Pi settings updated (quietStartup = true)"
+}
+
+# Restore the pre-pizza pi settings recorded by apply_pi_settings.
+revert_pi_settings() {
+    local settings_file backup_file
+    settings_file="$(pi_settings_file)"
+    backup_file="$(settings_backup_file)"
+
+    [ -f "$backup_file" ] || return 0
+
+    node -e '
+const fs = require("node:fs");
+const [settingsPath, backupPath] = process.argv.slice(1);
+
+let backup;
+try {
+    backup = JSON.parse(fs.readFileSync(backupPath, "utf8"));
+} catch {
+    backup = { keys: {}, existedBefore: false };
+}
+
+let settings = {};
+const fileExists = fs.existsSync(settingsPath);
+if (fileExists) {
+    try {
+        const parsed = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            settings = parsed;
+        }
+    } catch {
+        settings = {};
+    }
+}
+
+for (const [key, state] of Object.entries(backup.keys ?? {})) {
+    if (state.present) {
+        settings[key] = state.value;
+    } else {
+        delete settings[key];
+    }
+}
+
+if (!backup.existedBefore && Object.keys(settings).length === 0) {
+    // The file did not exist before pizza and nothing else has been added
+    // to it since — remove it rather than leaving an empty "{}" behind.
+    if (fileExists) {
+        fs.rmSync(settingsPath, { force: true });
+    }
+} else {
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+}
+fs.rmSync(backupPath, { force: true });
+' "$settings_file" "$backup_file"
+
+    success "Pi settings reverted"
 }
 
 # Remove all symlinks in pi's themes dir that point into the pizza install dir.
@@ -601,7 +731,7 @@ generate_package_json() {
 {
   "name": "pizza",
   "version": "${version}",
-  "description": "Pizza — Pi with toppings",
+  "description": "Pizza — Pi with extra toppings",
   "pizza": {
     "compatibility": {
       "pi": "${pi_compatibility_range}"
@@ -622,9 +752,12 @@ uninstall() {
         success "Deregistered from Pi"
     fi
 
-    # Remove agent + theme symlinks before deleting the install dir (targets disappear)
+    # Remove agent + theme symlinks before deleting the install dir (targets
+    # disappear). Revert pi settings before removing INSTALL_DIR too, since
+    # the backup file lives under it.
     unlink_agents
     unlink_themes
+    revert_pi_settings
 
     if [ -d "$INSTALL_DIR" ]; then
         rm -rf "$INSTALL_DIR"

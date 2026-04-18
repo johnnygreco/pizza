@@ -110,6 +110,45 @@ type HeaderState = {
 
 const HEADER_STATES = new WeakMap<object, HeaderState>();
 
+// ── Resources (skills / prompts / extensions / themes) ──────
+// Collected once per header rebuild and passed into buildBanner so the pinned
+// banner can summarize what Pi loaded at boot — and, when expanded, list the
+// names grouped by source. Expansion is a module-level flag because there's
+// one visual banner across the process; per-session toggling wouldn't map to
+// anything users can see differently.
+
+interface ResourceList {
+  skills: string[];
+  prompts: string[];
+  extensions: string[]; // commands with source === "extension"
+  themes: string[];
+}
+
+let resourcesExpanded = false;
+
+// `pi` (ExtensionAPI) is captured at registration so we can read getCommands()
+// during event handling. Only ExtensionAPI exposes getCommands — ExtensionContext
+// does not — so reaching it through `ctx` at render time would always be empty.
+let piApi: { getCommands?: () => Array<{ name: string; source: string }> } | undefined;
+
+function collectResources(ctx: any): ResourceList {
+  const commands: Array<{ name: string; source: string }> =
+    piApi?.getCommands?.() ?? [];
+  const bySource = (s: string) =>
+    commands
+      .filter((c) => c.source === s)
+      .map((c) => c.name)
+      .sort();
+  const themeEntries: Array<{ name: string }> = ctx?.ui?.getAllThemes?.() ?? [];
+  const themes = themeEntries.map((t) => t.name).sort();
+  return {
+    skills: bySource("skill").map((n) => n.replace(/^skill:/, "")),
+    prompts: bySource("prompt"),
+    extensions: bySource("extension"),
+    themes,
+  };
+}
+
 function relativeTime(date: Date): string {
   const diff = Date.now() - date.getTime();
   const secs = Math.floor(diff / 1000);
@@ -264,7 +303,7 @@ function buildLeftColumn(): string[] {
       content.push(pizza[i] + GAP + textLines[ti]);
     } else if (i === 7) {
       content.push(
-        pizza[i] + GAP + theme.tagPi + "Pi " + R + theme.tagText + "with toppings" + R,
+        pizza[i] + GAP + theme.tagPi + "Pi " + R + theme.tagText + "with extra toppings" + R,
       );
     } else {
       content.push(pizza[i]);
@@ -371,7 +410,12 @@ function fullWidthRow(content: string, totalW: number): string {
 const CENTER_PAD = "  ";
 const TWO_COL_OVERHEAD = 5 + CENTER_PAD.length * 2;
 
-function buildBanner(viewWidth: number, meta: SessionMeta): string[] {
+function buildBanner(
+  viewWidth: number,
+  meta: SessionMeta,
+  resources: ResourceList,
+  expanded: boolean,
+): string[] {
   const leftLines = buildLeftColumn();
   const rightLines = buildRightColumn();
   const leftW = Math.max(...leftLines.map((l) => visibleWidth(l)));
@@ -381,9 +425,78 @@ function buildBanner(viewWidth: number, meta: SessionMeta): string[] {
   const minTwoCol = leftW + rightW + TWO_COL_OVERHEAD;
 
   if (viewWidth >= minTwoCol) {
-    return assembleTwoCol(leftLines, leftW, rightLines, viewWidth, meta);
+    return assembleTwoCol(leftLines, leftW, rightLines, viewWidth, meta, resources, expanded);
   }
-  return assembleStacked(leftLines, leftW, rightLines, rightW, viewWidth, meta);
+  return assembleStacked(leftLines, leftW, rightLines, rightW, viewWidth, meta, resources, expanded);
+}
+
+// ── Resources section ───────────────────────────────────────
+
+function buildResourcesLines(
+  resources: ResourceList,
+  expanded: boolean,
+  innerW: number,
+): string[] {
+  const theme = getPizzaTheme();
+  const dot = " " + theme.divider + "·" + R + " ";
+  const arrow = expanded ? "▾" : "▸";
+  const heading =
+    theme.section + arrow + " resources" + R;
+
+  if (!expanded) {
+    const counts: Array<[string, number]> = [
+      ["skills", resources.skills.length],
+      ["prompts", resources.prompts.length],
+      ["ext", resources.extensions.length],
+      ["themes", resources.themes.length],
+    ];
+    const body = counts
+      .map(([label, n]) => theme.key + label + R + " " + theme.desc + n + R)
+      .join(dot);
+    const hint = theme.dim + "(/pizza resources)" + R;
+    return [`${heading}  ${body}  ${hint}`];
+  }
+
+  const lines: string[] = [heading];
+  const labelW = 10; // widest label + colon = "extensions:"
+  const categories: Array<[string, string[]]> = [
+    ["skills", resources.skills],
+    ["prompts", resources.prompts],
+    ["ext", resources.extensions],
+    ["themes", resources.themes],
+  ];
+  for (const [label, items] of categories) {
+    const header =
+      "  " + theme.key + (label + ":").padEnd(labelW) + R + " " +
+      theme.dim + "(" + items.length + ")" + R + " ";
+    const headerVis = visibleWidth(header);
+    if (items.length === 0) {
+      lines.push(header + theme.dim + "—" + R);
+      continue;
+    }
+    // -1 accounts for the leading-space indent fullWidthRow adds on each row.
+    const remaining = Math.max(8, innerW - headerVis - 1);
+    const continuationIndent = " ".repeat(headerVis);
+
+    const wrappedBodies: string[] = [];
+    let current = "";
+    for (const item of items) {
+      const candidate = current.length === 0 ? item : current + ", " + item;
+      if (visibleWidth(candidate) <= remaining) {
+        current = candidate;
+      } else {
+        if (current.length > 0) wrappedBodies.push(current);
+        current = item;
+      }
+    }
+    if (current.length > 0) wrappedBodies.push(current);
+
+    for (let i = 0; i < wrappedBodies.length; i++) {
+      const prefix = i === 0 ? header : continuationIndent;
+      lines.push(prefix + theme.desc + wrappedBodies[i] + R);
+    }
+  }
+  return lines;
 }
 
 function assembleTwoCol(
@@ -392,6 +505,8 @@ function assembleTwoCol(
   rightLines: string[],
   totalW: number,
   meta: SessionMeta,
+  resources: ResourceList,
+  expanded: boolean,
 ): string[] {
   const theme = getPizzaTheme();
   const rW = totalW - leftW - TWO_COL_OVERHEAD;
@@ -414,6 +529,13 @@ function assembleTwoCol(
     );
   }
 
+  // Resources section (full width)
+  rows.push(fullWidthRow("", totalW));
+  const innerW = Math.max(0, totalW - 4);
+  for (const line of buildResourcesLines(resources, expanded, innerW)) {
+    rows.push(fullWidthRow(" " + line, totalW));
+  }
+
   // Padding before session meta
   rows.push(fullWidthRow("", totalW));
 
@@ -431,11 +553,12 @@ function assembleStacked(
   rightW: number,
   viewWidth: number,
   meta: SessionMeta,
+  resources: ResourceList,
+  expanded: boolean,
 ): string[] {
   const theme = getPizzaTheme();
   const contentW = Math.max(leftW, rightW);
   const totalW = Math.max(contentW + 4, viewWidth);
-  const inner = totalW - 4;
 
   const rows: string[] = [buildTopBorder(totalW)];
 
@@ -452,6 +575,13 @@ function assembleStacked(
     rows.push(fullWidthRow(r, totalW));
   }
 
+  // Resources section (full width)
+  rows.push(fullWidthRow("", totalW));
+  const innerW = Math.max(0, totalW - 4);
+  for (const line of buildResourcesLines(resources, expanded, innerW)) {
+    rows.push(fullWidthRow(" " + line, totalW));
+  }
+
   // Padding before session meta
   rows.push(fullWidthRow("", totalW));
 
@@ -466,11 +596,15 @@ function assembleStacked(
 
 class PizzaHeader {
   private meta: SessionMeta;
-  private cache?: { width: number; lines: string[] };
+  private resources: ResourceList;
+  private expanded: boolean;
+  private cache?: { width: number; expanded: boolean; lines: string[] };
   private requestRender?: () => void;
 
-  constructor(meta: SessionMeta) {
+  constructor(meta: SessionMeta, resources: ResourceList, expanded: boolean) {
     this.meta = meta;
+    this.resources = resources;
+    this.expanded = expanded;
   }
 
   attach(tui: { requestRender?: () => void } | undefined): void {
@@ -478,8 +612,12 @@ class PizzaHeader {
   }
 
   render(width: number): string[] {
-    if (!this.cache || this.cache.width !== width) {
-      this.cache = { width, lines: buildBanner(width, this.meta) };
+    if (!this.cache || this.cache.width !== width || this.cache.expanded !== this.expanded) {
+      this.cache = {
+        width,
+        expanded: this.expanded,
+        lines: buildBanner(width, this.meta, this.resources, this.expanded),
+      };
     }
     return this.cache.lines;
   }
@@ -488,8 +626,10 @@ class PizzaHeader {
     this.cache = undefined;
   }
 
-  update(meta: SessionMeta): void {
+  update(meta: SessionMeta, resources: ResourceList, expanded: boolean): void {
     this.meta = meta;
+    this.resources = resources;
+    this.expanded = expanded;
     this.invalidate();
     this.requestRender?.();
   }
@@ -532,14 +672,15 @@ function setOrUpdateHeader(ctx: any, reason?: string): void {
   const existing = HEADER_STATES.get(sessionManager);
   const effectiveReason = reason ?? existing?.reason ?? "startup";
   const meta = extractSessionMeta({ reason: effectiveReason }, ctx);
+  const resources = collectResources(ctx);
 
   if (existing) {
     existing.reason = effectiveReason;
-    existing.header.update(meta);
+    existing.header.update(meta, resources, resourcesExpanded);
     return;
   }
 
-  const header = new PizzaHeader(meta);
+  const header = new PizzaHeader(meta, resources, resourcesExpanded);
   HEADER_STATES.set(sessionManager, { header, reason: effectiveReason });
   ctx.ui.setHeader((tui: { requestRender?: () => void }, _theme: unknown) => {
     header.attach(tui);
@@ -549,6 +690,7 @@ function setOrUpdateHeader(ctx: any, reason?: string): void {
 
 // ── Extension entry point ────────────────────────────────────
 export default function pizzaUiExtension(pi: ExtensionAPI): void {
+  piApi = pi;
   pi.on("session_start", async (event, ctx) => {
     maybeWarnAboutPiCompatibility(ctx, PI_VERSION);
     if (!ctx.hasUI) return;
@@ -571,11 +713,16 @@ export default function pizzaUiExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("pizza", {
-    description: "Show Pizza status, or run `theme` to change the theme",
+    description:
+      "Show Pizza status, or run `theme` / `resources` for theme & banner resources",
     handler: async (args, ctx) => {
       const tokens = (args ?? "").trim().split(/\s+/).filter(Boolean);
       if (tokens[0] === "theme") {
         await runThemeCommand(tokens.slice(1), ctx);
+        return;
+      }
+      if (tokens[0] === "resources") {
+        runResourcesCommand(tokens.slice(1), ctx);
         return;
       }
 
@@ -600,6 +747,23 @@ function emit(ctx: any, lines: string[], level: "info" | "warning"): void {
   const msg = lines.join("\n");
   if (ctx?.hasUI && ctx.ui) ctx.ui.notify(msg, level);
   else console.log(msg);
+}
+
+function runResourcesCommand(tokens: string[], ctx: any): void {
+  const arg = tokens[0]?.toLowerCase();
+  const prev = resourcesExpanded;
+  if (arg === "expand" || arg === "open") resourcesExpanded = true;
+  else if (arg === "collapse" || arg === "close") resourcesExpanded = false;
+  else resourcesExpanded = !resourcesExpanded;
+
+  setOrUpdateHeader(ctx);
+  if (prev !== resourcesExpanded) {
+    emit(
+      ctx,
+      [`Resources ${resourcesExpanded ? "expanded" : "collapsed"}`],
+      "info",
+    );
+  }
 }
 
 function listAvailableThemes(ctx: any): string[] {

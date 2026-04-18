@@ -640,6 +640,176 @@ test_uninstall_nonexistent() {
     destroy_env
 }
 
+# ── Helper: read one key from a JSON file via node ────────────────────────
+json_get() {
+    local file="$1" key="$2"
+    node -e '
+const fs = require("node:fs");
+const [path, key] = process.argv.slice(1);
+const data = JSON.parse(fs.readFileSync(path, "utf8"));
+const value = data[key];
+if (value === undefined) process.stdout.write("__MISSING__");
+else process.stdout.write(JSON.stringify(value));
+' "$file" "$key"
+}
+
+test_settings_creates_file_when_absent() {
+    echo "Install creates settings.json with quietStartup=true when none exists"
+    create_env
+    mock_pi "0.67.1"
+
+    local settings_file="$TEST_DIR/home/.pi/agent/settings.json"
+    [ -f "$settings_file" ] && rm -f "$settings_file"
+
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+
+    assert_file_exists "settings.json created" "$settings_file"
+    local val
+    val="$(json_get "$settings_file" quietStartup)"
+    if [ "$val" = "true" ]; then
+        pass "quietStartup set to true"
+    else
+        fail "quietStartup not true" "got: $val"
+    fi
+
+    destroy_env
+}
+
+test_settings_preserves_other_keys() {
+    echo "Install preserves other keys already in settings.json"
+    create_env
+    mock_pi "0.67.1"
+
+    local settings_file="$TEST_DIR/home/.pi/agent/settings.json"
+    mkdir -p "$(dirname "$settings_file")"
+    cat >"$settings_file" <<'EOF'
+{
+  "theme": "dark",
+  "someOtherKey": 42
+}
+EOF
+
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+
+    local theme other quiet
+    theme="$(json_get "$settings_file" theme)"
+    other="$(json_get "$settings_file" someOtherKey)"
+    quiet="$(json_get "$settings_file" quietStartup)"
+
+    if [ "$theme" = '"dark"' ]; then pass "theme preserved"; else fail "theme not preserved" "got: $theme"; fi
+    if [ "$other" = "42" ]; then pass "someOtherKey preserved"; else fail "someOtherKey not preserved" "got: $other"; fi
+    if [ "$quiet" = "true" ]; then pass "quietStartup added"; else fail "quietStartup not added" "got: $quiet"; fi
+
+    destroy_env
+}
+
+test_uninstall_restores_prior_quietstartup_value() {
+    echo "Uninstall restores prior quietStartup (user had it false)"
+    create_env
+    mock_pi "0.67.1"
+
+    local settings_file="$TEST_DIR/home/.pi/agent/settings.json"
+    mkdir -p "$(dirname "$settings_file")"
+    cat >"$settings_file" <<'EOF'
+{
+  "quietStartup": false,
+  "theme": "retro-pizzeria"
+}
+EOF
+
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+
+    # Mid-state: pizza set it true
+    local mid
+    mid="$(json_get "$settings_file" quietStartup)"
+    if [ "$mid" = "true" ]; then pass "quietStartup flipped to true during install"; else fail "install did not set quietStartup" "got: $mid"; fi
+
+    run_installer --uninstall >/dev/null 2>&1 || true
+
+    assert_file_exists "settings.json still exists after uninstall" "$settings_file"
+    local restored theme
+    restored="$(json_get "$settings_file" quietStartup)"
+    theme="$(json_get "$settings_file" theme)"
+    if [ "$restored" = "false" ]; then pass "quietStartup restored to false"; else fail "quietStartup not restored" "got: $restored"; fi
+    if [ "$theme" = '"retro-pizzeria"' ]; then pass "unrelated keys preserved"; else fail "theme not preserved" "got: $theme"; fi
+
+    destroy_env
+}
+
+test_uninstall_removes_settings_file_if_we_created_it() {
+    echo "Uninstall deletes settings.json if pizza created it and nothing else was added"
+    create_env
+    mock_pi "0.67.1"
+
+    local settings_file="$TEST_DIR/home/.pi/agent/settings.json"
+    [ -f "$settings_file" ] && rm -f "$settings_file"
+
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+    assert_file_exists "settings.json created during install" "$settings_file"
+
+    run_installer --uninstall >/dev/null 2>&1 || true
+    if [ ! -f "$settings_file" ]; then
+        pass "settings.json removed on uninstall (pizza created it, nothing added)"
+    else
+        fail "settings.json should be removed" "$(cat "$settings_file")"
+    fi
+
+    destroy_env
+}
+
+test_uninstall_removes_only_quietstartup_if_no_prior_key() {
+    echo "Uninstall removes only quietStartup when it was absent pre-install"
+    create_env
+    mock_pi "0.67.1"
+
+    local settings_file="$TEST_DIR/home/.pi/agent/settings.json"
+    mkdir -p "$(dirname "$settings_file")"
+    cat >"$settings_file" <<'EOF'
+{
+  "theme": "retro-pizzeria"
+}
+EOF
+
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+    run_installer --uninstall >/dev/null 2>&1 || true
+
+    assert_file_exists "settings.json kept (theme still present)" "$settings_file"
+    local quiet theme
+    quiet="$(json_get "$settings_file" quietStartup)"
+    theme="$(json_get "$settings_file" theme)"
+    if [ "$quiet" = "__MISSING__" ]; then pass "quietStartup removed"; else fail "quietStartup should be removed" "got: $quiet"; fi
+    if [ "$theme" = '"retro-pizzeria"' ]; then pass "theme preserved through round trip"; else fail "theme not preserved" "got: $theme"; fi
+
+    destroy_env
+}
+
+test_reinstall_preserves_original_backup() {
+    echo "Reinstall does not lose the true pre-pizza quietStartup value"
+    create_env
+    mock_pi "0.67.1"
+
+    local settings_file="$TEST_DIR/home/.pi/agent/settings.json"
+    mkdir -p "$(dirname "$settings_file")"
+    echo '{"quietStartup": false}' >"$settings_file"
+
+    # First install: backup captures `false` as prior state.
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+    # Reinstall: backup should NOT be overwritten to capture `true`.
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+
+    run_installer --uninstall >/dev/null 2>&1 || true
+
+    local restored
+    restored="$(json_get "$settings_file" quietStartup)"
+    if [ "$restored" = "false" ]; then
+        pass "reinstall preserved original backup (restored to false)"
+    else
+        fail "reinstall lost original backup" "got: $restored"
+    fi
+
+    destroy_env
+}
+
 # ═══════════════════════════════════════════════════════════════════════
 # Tests: version resolution
 # ══════════════════════════════════════════════���════════════════════════
@@ -783,6 +953,20 @@ main() {
     test_uninstall_removes_directory
     echo ""
     test_uninstall_nonexistent
+
+    echo ""
+    echo "--- Pi settings ---"
+    test_settings_creates_file_when_absent
+    echo ""
+    test_settings_preserves_other_keys
+    echo ""
+    test_uninstall_restores_prior_quietstartup_value
+    echo ""
+    test_uninstall_removes_settings_file_if_we_created_it
+    echo ""
+    test_uninstall_removes_only_quietstartup_if_no_prior_key
+    echo ""
+    test_reinstall_preserves_original_backup
 
     echo ""
     echo "--- Version resolution ---"
