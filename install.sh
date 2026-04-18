@@ -178,6 +178,9 @@ main() {
     # ── Symlink agent definitions into ~/.agents/ ────────────────────────
     link_agents
 
+    # ── Symlink themes into ~/.pi/agent/themes/ ──────────────────────────
+    link_themes
+
     # ── Generate package.json ────────────────────────────────────────────
     generate_package_json "$VERSION" "$PI_COMPATIBILITY_RANGE"
 
@@ -222,6 +225,112 @@ unlink_agents() {
 
     if [ "$count" -gt 0 ]; then
         success "Removed $count agent symlink(s) from $agents_dir"
+    fi
+}
+
+# Resolve pi's custom themes directory, honoring *_CODING_AGENT_DIR env vars the
+# same way pi's config.ts does. Falls back to ~/.pi/agent/themes.
+pi_themes_dir() {
+    local agent_dir=""
+    if [ -n "${PI_CODING_AGENT_DIR:-}" ]; then
+        agent_dir="$PI_CODING_AGENT_DIR"
+    elif [ -n "${TAU_CODING_AGENT_DIR:-}" ]; then
+        agent_dir="$TAU_CODING_AGENT_DIR"
+    else
+        # Look for any *_CODING_AGENT_DIR override (same fallback pi uses).
+        while IFS='=' read -r key value; do
+            case "$key" in
+                *_CODING_AGENT_DIR)
+                    if [ -n "$value" ]; then
+                        agent_dir="$value"
+                        break
+                    fi
+                    ;;
+            esac
+        done < <(env)
+    fi
+
+    if [ -z "$agent_dir" ]; then
+        agent_dir="$HOME/.pi/agent"
+    fi
+
+    # Expand ~ as pi does.
+    case "$agent_dir" in
+        "~")   agent_dir="$HOME" ;;
+        "~/"*) agent_dir="$HOME/${agent_dir#~/}" ;;
+    esac
+
+    echo "$agent_dir/themes"
+}
+
+# Remove all symlinks in pi's themes dir that point into the pizza install dir.
+unlink_themes() {
+    local themes_dir
+    themes_dir="$(pi_themes_dir)"
+    [ -d "$themes_dir" ] || return 0
+
+    local count=0
+    for link in "$themes_dir"/*.json; do
+        [ -L "$link" ] || continue
+        local target
+        target="$(readlink "$link")"
+        case "$target" in
+            "$INSTALL_DIR/extensions/shared/themes/"*) rm -f "$link"; count=$((count + 1)) ;;
+        esac
+    done
+
+    if [ "$count" -gt 0 ]; then
+        success "Removed $count theme symlink(s) from $themes_dir"
+    fi
+}
+
+# Symlink each .json file in $INSTALL_DIR/extensions/shared/themes/ into pi's
+# themes dir so pi's initTheme() can resolve them at startup (before extensions
+# load) and so pi's file watcher picks up edits.
+link_themes() {
+    local themes_src="$INSTALL_DIR/extensions/shared/themes"
+    local themes_dir
+    themes_dir="$(pi_themes_dir)"
+
+    # Clean stale symlinks from a previous install
+    unlink_themes
+
+    # Nothing to link if no .json files shipped
+    local has_themes=0
+    for f in "$themes_src"/*.json; do
+        [ -f "$f" ] && has_themes=1 && break
+    done
+    [ "$has_themes" -eq 0 ] && return 0
+
+    mkdir -p "$themes_dir"
+
+    local count=0
+    for f in "$themes_src"/*.json; do
+        [ -f "$f" ] || continue
+        local name dest
+        name="$(basename "$f")"
+        dest="$themes_dir/$name"
+
+        # Don't clobber files that aren't ours
+        if [ -e "$dest" ]; then
+            local is_ours=0
+            if [ -L "$dest" ]; then
+                case "$(readlink "$dest")" in
+                    "$INSTALL_DIR/extensions/shared/themes/"*) is_ours=1 ;;
+                esac
+            fi
+            if [ "$is_ours" -eq 0 ]; then
+                warn "Skipping $name — $dest already exists (not managed by Pizza)"
+                continue
+            fi
+        fi
+
+        ln -sf "$f" "$dest"
+        count=$((count + 1))
+    done
+
+    if [ "$count" -gt 0 ]; then
+        success "$count theme(s) linked into $themes_dir"
     fi
 }
 
@@ -513,8 +622,9 @@ uninstall() {
         success "Deregistered from Pi"
     fi
 
-    # Remove agent symlinks before deleting the install dir (targets disappear)
+    # Remove agent + theme symlinks before deleting the install dir (targets disappear)
     unlink_agents
+    unlink_themes
 
     if [ -d "$INSTALL_DIR" ]; then
         rm -rf "$INSTALL_DIR"

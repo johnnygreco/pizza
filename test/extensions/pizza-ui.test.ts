@@ -1,9 +1,14 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import pizzaUiExtension, {
   maybeWarnAboutPiCompatibility,
 } from "../../extensions/pizza-ui.ts";
+import {
+  DEFAULT_PIZZA_THEME,
+  getActivePizzaThemeName,
+  setActivePizzaTheme,
+} from "../../extensions/shared/pizza-theme.ts";
 
 const pkg = JSON.parse(
   readFileSync(resolve(__dirname, "..", "..", "package.json"), "utf-8"),
@@ -360,6 +365,45 @@ describe("pizza-ui extension", () => {
     expect(output).toContain("New session");
   });
 
+  it("no rendered line exceeds the requested width, even with a long session meta", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    // A long first-user message + long model label would previously overflow
+    // the stacked banner's inner width at narrow terminal sizes.
+    const entries = [
+      {
+        type: "message",
+        id: "1",
+        parentId: null,
+        timestamp: new Date(Date.now() - 3600000).toISOString(),
+        message: {
+          role: "user",
+          content:
+            "I want to change the tagline of Pizza from something to something else that is quite long",
+        },
+      },
+    ];
+    const ctx = createMockContext(true, {
+      entries,
+      model: {
+        id: "anthropic/claude-opus-4.6",
+        name: "Anthropic: Claude Opus 4.6",
+        provider: "openrouter",
+      },
+    });
+    await registeredEvents.get("session_start")![0]({ reason: "resume" }, ctx);
+
+    for (const width of [70, 93, 120, 160]) {
+      const lines = renderHeader(ctx, width).split("\n");
+      for (const line of lines) {
+        // Visible width of every rendered line must fit the terminal width.
+        const vis = stripAnsi(line).length;
+        expect(vis).toBeLessThanOrEqual(width);
+      }
+    }
+  });
+
   it("skips UI setup when no UI", async () => {
     const { api, registeredEvents } = createMockApi();
     pizzaUiExtension(api as any);
@@ -418,5 +462,153 @@ describe("pizza-ui extension", () => {
     await registeredCommands.get("pizza").handler("", ctx);
 
     expect(ctx.ui.notify).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Helper: extend the mock context with the theme-switching surface
+ * (`ctx.ui.setTheme`, `ctx.ui.theme`, `ctx.ui.getAllThemes`) so /pizza theme
+ * has something to talk to.
+ */
+function withThemeSurface(ctx: any, initial = "retro-pizzeria") {
+  ctx.ui.theme = { name: initial };
+  ctx.ui.getAllThemes = vi.fn(() => [
+    { name: "retro-pizzeria", path: undefined },
+    { name: "cyberpunk-pizzeria", path: undefined },
+  ]);
+  ctx.ui.setTheme = vi.fn((name: string) => {
+    ctx.ui.theme = { name };
+    return { success: true };
+  });
+  ctx.ui.select = vi.fn(async (_title: string, _options: string[]) => undefined);
+  return ctx;
+}
+
+describe("/pizza theme subcommand", () => {
+  beforeEach(() => {
+    setActivePizzaTheme(DEFAULT_PIZZA_THEME);
+  });
+
+  afterEach(() => {
+    setActivePizzaTheme(DEFAULT_PIZZA_THEME);
+  });
+
+  it("opens a selector when /pizza theme runs without an argument", async () => {
+    const { api, registeredCommands } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemeSurface(createMockContext(true));
+    ctx.ui.select = vi.fn(async () => "cyberpunk-pizzeria");
+
+    await registeredCommands.get("pizza").handler("theme", ctx);
+
+    expect(ctx.ui.select).toHaveBeenCalledTimes(1);
+    const [title, options] = ctx.ui.select.mock.calls[0];
+    expect(title).toContain("current: retro-pizzeria");
+    expect(options).toEqual(["cyberpunk-pizzeria", "retro-pizzeria"]);
+
+    expect(ctx.ui.setTheme).toHaveBeenCalledWith("cyberpunk-pizzeria");
+    expect(getActivePizzaThemeName()).toBe("cyberpunk-pizzeria");
+    const msg = ctx.ui.notify.mock.calls.at(-1)![0] as string;
+    expect(msg).toContain("Theme: cyberpunk-pizzeria");
+  });
+
+  it("leaves state unchanged when the selector is cancelled", async () => {
+    const { api, registeredCommands } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemeSurface(createMockContext(true));
+    ctx.ui.select = vi.fn(async () => undefined);
+
+    await registeredCommands.get("pizza").handler("theme", ctx);
+
+    expect(ctx.ui.select).toHaveBeenCalledTimes(1);
+    expect(ctx.ui.setTheme).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
+    expect(getActivePizzaThemeName()).toBe("retro-pizzeria");
+  });
+
+  it("falls back to a printed list when no select UI is available", async () => {
+    const { api, registeredCommands } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemeSurface(createMockContext(true));
+    delete (ctx.ui as any).select;
+
+    await registeredCommands.get("pizza").handler("theme", ctx);
+
+    const msg = ctx.ui.notify.mock.calls.at(-1)![0] as string;
+    expect(msg).toContain("pizza themes");
+    expect(msg).toContain("retro-pizzeria");
+    expect(msg).toContain("cyberpunk-pizzeria");
+    expect(msg).toContain("\u2192 retro-pizzeria");
+  });
+
+  it("flips both Pi and Pizza in a single call", async () => {
+    const { api, registeredEvents, registeredCommands } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemeSurface(createMockContext(true));
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+    await registeredCommands.get("pizza").handler("theme cyberpunk-pizzeria", ctx);
+
+    expect(ctx.ui.setTheme).toHaveBeenCalledWith("cyberpunk-pizzeria");
+    expect(getActivePizzaThemeName()).toBe("cyberpunk-pizzeria");
+    const msg = ctx.ui.notify.mock.calls.at(-1)![0] as string;
+    expect(msg).toContain("Theme: cyberpunk-pizzeria");
+  });
+
+  it("turn_end follows pi-originated theme changes", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemeSurface(createMockContext(true));
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+    expect(getActivePizzaThemeName()).toBe("retro-pizzeria");
+
+    // Simulate pi's own /theme command flipping the theme out-of-band.
+    ctx.ui.theme = { name: "cyberpunk-pizzeria" };
+    await registeredEvents.get("turn_end")![0]({}, ctx);
+    expect(getActivePizzaThemeName()).toBe("cyberpunk-pizzeria");
+  });
+
+  it("warns and leaves state untouched when pi's setTheme fails", async () => {
+    const { api, registeredCommands } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemeSurface(createMockContext(true));
+    ctx.ui.setTheme = vi.fn(() => ({ success: false, error: "boom" }));
+    await registeredCommands.get("pizza").handler("theme cyberpunk-pizzeria", ctx);
+
+    expect(getActivePizzaThemeName()).toBe("retro-pizzeria");
+    const call = ctx.ui.notify.mock.calls.at(-1)!;
+    expect(call[0]).toContain("boom");
+    expect(call[1]).toBe("warning");
+  });
+
+  it("warns on unknown theme names without changing state", async () => {
+    const { api, registeredCommands } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemeSurface(createMockContext(true));
+    await registeredCommands.get("pizza").handler("theme nope", ctx);
+
+    expect(getActivePizzaThemeName()).toBe("retro-pizzeria");
+    expect(ctx.ui.setTheme).not.toHaveBeenCalled();
+    const call = ctx.ui.notify.mock.calls.at(-1)!;
+    expect(call[0]).toContain("Unknown theme: nope");
+    expect(call[1]).toBe("warning");
+  });
+
+  it("/pizza shows the active theme", async () => {
+    const { api, registeredCommands } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemeSurface(createMockContext(true));
+    await registeredCommands.get("pizza").handler("theme cyberpunk-pizzeria", ctx);
+    await registeredCommands.get("pizza").handler("", ctx);
+
+    const msg = ctx.ui.notify.mock.calls.at(-1)![0] as string;
+    expect(msg).toContain("Theme: cyberpunk-pizzeria");
   });
 });

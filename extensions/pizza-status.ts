@@ -7,20 +7,11 @@
 import type { ExtensionAPI, ExtensionContext, ReadonlyFooterDataProvider } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { formatModelLabel } from "./shared/model-label.ts";
+import { ANSI_BOLD, ANSI_RESET, getPizzaTheme, onPizzaThemeChange } from "./shared/pizza-theme.ts";
 
 const STATUS_KEY = "pizza.status";
 const METER_WIDTH = 20;
 const AUTO_CONTEXT_SUFFIX = " (auto)";
-
-const R = "\x1b[0m";
-const B = "\x1b[1m";
-const fg = (n: number) => `\x1b[38;5;${n}m`;
-
-const PEP = "\x1b[31m";
-const PEPPER = "\x1b[32m";
-const GOLD = "\x1b[33m";
-const MARQUEE = fg(180);
-const DIM = fg(94);
 
 type FooterTheme = {
 	fg(color: string, text: string): string;
@@ -127,9 +118,10 @@ function getSessionUsage(ctx: ExtensionContext): {
 }
 
 function colorForPercent(percent: number): string {
-	if (percent >= 90) return PEP;
-	if (percent >= 70) return GOLD;
-	return PEPPER;
+	const theme = getPizzaTheme();
+	if (percent >= 90) return theme.meterHigh;
+	if (percent >= 70) return theme.meterMid;
+	return theme.meterLow;
 }
 
 function buildProgressBar(percent: number): string {
@@ -137,16 +129,17 @@ function buildProgressBar(percent: number): string {
 	const color = colorForPercent(percent);
 	let bar = "";
 	for (let i = 0; i < METER_WIDTH; i++) {
-		bar += i < filled ? `${color}\u2588${R}` : `${color}\u2591${R}`;
+		bar += i < filled ? `${color}\u2588${ANSI_RESET}` : `${color}\u2591${ANSI_RESET}`;
 	}
 	return bar;
 }
 
 function buildStatusLine(contextDisplay: string, percent: number, model?: string): string {
+	const theme = getPizzaTheme();
 	const marquee = "🍕";
-	const percentText = `${B}${colorForPercent(percent)}${contextDisplay}${R}`;
-	const modelText = model ? `${MARQUEE}${model}${R}` : "";
-	const divider = `${DIM} \u00b7 ${R}`;
+	const percentText = `${ANSI_BOLD}${colorForPercent(percent)}${contextDisplay}${ANSI_RESET}`;
+	const modelText = model ? `${theme.marquee}${model}${ANSI_RESET}` : "";
+	const divider = `${theme.dim} \u00b7 ${ANSI_RESET}`;
 
 	let line = `${marquee} ${buildProgressBar(percent)} ${percentText}`;
 	if (modelText) {
@@ -264,6 +257,9 @@ export default function pizzaStatusExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
 		installFooter(ctx);
 		updateStatus(ctx);
+		// The status line is a cached ANSI string in pi's state, so flipping
+		// the pizza theme doesn't recolor it until we call setStatus again.
+		onPizzaThemeChange(() => updateStatus(ctx));
 	});
 
 	pi.on("turn_start", async (_event, ctx) => {

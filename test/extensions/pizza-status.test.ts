@@ -1,5 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import pizzaStatusExtension from "../../extensions/pizza-status.ts";
+import {
+  DEFAULT_PIZZA_THEME,
+  setActivePizzaTheme,
+} from "../../extensions/shared/pizza-theme.ts";
 
 function createMockApi() {
   const registeredEvents = new Map<string, Function[]>();
@@ -268,6 +272,47 @@ describe("pizza-status extension", () => {
 
     expect(ctx.ui.setStatus).not.toHaveBeenCalled();
     expect(ctx.ui.setFooter).not.toHaveBeenCalled();
+  });
+
+  describe("theme-change refresh", () => {
+    beforeEach(() => {
+      setActivePizzaTheme(DEFAULT_PIZZA_THEME);
+    });
+
+    afterEach(() => {
+      setActivePizzaTheme(DEFAULT_PIZZA_THEME);
+    });
+
+    it("refreshes the cached status line when the active theme changes", async () => {
+      const { api, registeredEvents } = createMockApi();
+      pizzaStatusExtension(api as any);
+
+      const ctx = createMockContext(true, { percent: 50 });
+      await registeredEvents.get("session_start")![0]({}, ctx);
+
+      expect(ctx.ui.setStatus).toHaveBeenCalledTimes(1);
+      const firstRaw = ctx.ui.setStatus.mock.calls[0][1] as string;
+
+      setActivePizzaTheme("cyberpunk-pizzeria");
+
+      expect(ctx.ui.setStatus).toHaveBeenCalledTimes(2);
+      const secondRaw = ctx.ui.setStatus.mock.calls[1][1] as string;
+      // Same visible content, but ANSI escapes (theme colors) should differ.
+      expect(stripAnsi(secondRaw)).toBe(stripAnsi(firstRaw));
+      expect(secondRaw).not.toBe(firstRaw);
+    });
+
+    it("does not re-push the status line when the theme name is unchanged", async () => {
+      const { api, registeredEvents } = createMockApi();
+      pizzaStatusExtension(api as any);
+
+      const ctx = createMockContext(true, { percent: 50 });
+      await registeredEvents.get("session_start")![0]({}, ctx);
+      expect(ctx.ui.setStatus).toHaveBeenCalledTimes(1);
+
+      setActivePizzaTheme(DEFAULT_PIZZA_THEME);
+      expect(ctx.ui.setStatus).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("prefers the real provider label over vendor-prefixed model names", async () => {

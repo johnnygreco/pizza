@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { VERSION as PI_VERSION } from "@mariozechner/pi-coding-agent";
+import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { basename } from "node:path";
 import {
   PIZZA_VERSION,
@@ -7,6 +8,17 @@ import {
   getPiCompatibilityWarning,
 } from "./shared/pi-compat.ts";
 import { formatModelLabel } from "./shared/model-label.ts";
+import {
+  ANSI_BG_OFF,
+  ANSI_RESET,
+  DEFAULT_PIZZA_THEME,
+  getActivePizzaThemeName,
+  getPizzaTheme,
+  hasPizzaTheme,
+  listPizzaThemes,
+  registerPizzaThemePath,
+  setActivePizzaTheme,
+} from "./shared/pizza-theme.ts";
 
 const VERSION = PIZZA_VERSION;
 
@@ -28,70 +40,56 @@ export function maybeWarnAboutPiCompatibility(
   console.warn(warning);
 }
 
-// ── Retro pizzeria arcade palette ────────────────────────────
-const R = "\x1b[0m";
-const B = "\x1b[1m";
-const fg = (n: number) => `\x1b[38;5;${n}m`;
-const bg = (n: number) => `\x1b[48;5;${n}m`;
-const BG_OFF = "\x1b[49m";
-
-const CRUST = "\x1b[38;2;195;160;75m";
-const CHEESE_BG = bg(229);
-const PEP = fg(160);
-const PEPPER = fg(64);
-const DRIP = fg(222);
-const SAUCE = fg(130);
-const CLR_P = B + fg(223);
-const CLR_I = B + fg(221);
-const CLR_Z1 = B + fg(215);
-const CLR_Z2 = B + fg(209);
-const CLR_A = B + fg(180);
-const BORDER_CLR = B + fg(130);
-const TAG_PI = B + fg(215);
-const TAG_TXT = fg(180);
-const KEY_CLR = B + fg(221);
-const DESC_CLR = fg(252);
-const DIV_CLR = fg(94);
-const SECTION_CLR = B + fg(179);
+const R = ANSI_RESET;
 
 // ── Pizza art colorizer ──────────────────────────────────────
 function colorizePizza(line: string): string {
+  const theme = getPizzaTheme();
   let out = "";
   let curFg = "";
   let bgOn = false;
   for (const ch of line) {
     let clr = "";
     let wantBg = false;
-    if ("█▄▀".includes(ch)) clr = CRUST;
-    else if (ch === "░") { clr = SAUCE; wantBg = true; }
-    else if (ch === "●") { clr = PEP; wantBg = true; }
-    else if ("▬▮".includes(ch)) { clr = PEPPER; wantBg = true; }
-    else if ("╽┃│╷╵▁▂▃".includes(ch)) clr = DRIP;
+    if ("█▄▀".includes(ch)) clr = theme.crust;
+    else if (ch === "░") { clr = theme.sauce; wantBg = true; }
+    else if (ch === "●") { clr = theme.pepperoni; wantBg = true; }
+    else if ("▬▮".includes(ch)) { clr = theme.pepper; wantBg = true; }
+    else if ("╽┃│╷╵▁▂▃".includes(ch)) clr = theme.drip;
     else {
-      if (bgOn) { out += BG_OFF; bgOn = false; }
+      if (bgOn) { out += ANSI_BG_OFF; bgOn = false; }
       out += ch;
       continue;
     }
-    if (wantBg && !bgOn) { out += CHEESE_BG; bgOn = true; }
-    else if (!wantBg && bgOn) { out += BG_OFF; bgOn = false; }
+    if (wantBg && !bgOn) { out += theme.cheeseBg; bgOn = true; }
+    else if (!wantBg && bgOn) { out += ANSI_BG_OFF; bgOn = false; }
     if (clr !== curFg) {
       out += clr;
       curFg = clr;
     }
     out += ch;
   }
-  if (bgOn) out += BG_OFF;
+  if (bgOn) out += ANSI_BG_OFF;
   return out + R;
 }
 
 // ── String helpers ──────────────────────────────────────────
-function stripAnsi(s: string): string {
-  return s.replace(/\x1b\[[0-9;]*m/g, "");
+
+// Pad s with spaces up to `width` visible columns. Does NOT truncate overflow.
+function padRight(s: string, width: number): string {
+  const vis = visibleWidth(s);
+  return vis < width ? s + " ".repeat(width - vis) : s;
 }
 
-function padRight(s: string, width: number): string {
-  const vis = stripAnsi(s).length;
-  return vis < width ? s + " ".repeat(width - vis) : s;
+// Fit s to exactly `width` visible columns — truncate with ellipsis if too
+// long, pad with spaces if too short. Used for anything rendered inside the
+// bordered banner, since pi-tui rejects rows whose visible width doesn't
+// match the terminal width.
+function fitExact(s: string, width: number): string {
+  if (width <= 0) return "";
+  return visibleWidth(s) <= width
+    ? padRight(s, width)
+    : truncateToWidth(s, width, "…", true);
 }
 
 // ── Session metadata ────────────────────────────────────────
@@ -166,35 +164,36 @@ function extractSessionMeta(event: any, ctx: any): SessionMeta {
 }
 
 function formatSessionMeta(meta: SessionMeta): string {
-  const dot = " " + DIV_CLR + "·" + R + " ";
+  const theme = getPizzaTheme();
+  const dot = " " + theme.divider + "·" + R + " ";
   const parts: string[] = [];
 
   const isNew = meta.reason === "new" || (meta.reason === "startup" && meta.messageCount === 0);
   if (isNew) {
-    parts.push(KEY_CLR + "New session" + R);
+    parts.push(theme.key + "New session" + R);
   } else if (meta.reason === "fork") {
-    parts.push(KEY_CLR + "Forked" + R);
+    parts.push(theme.key + "Forked" + R);
   } else if (meta.reason === "reload") {
-    parts.push(KEY_CLR + "Reloaded" + R);
+    parts.push(theme.key + "Reloaded" + R);
   } else {
-    parts.push(KEY_CLR + "Resumed" + R);
+    parts.push(theme.key + "Resumed" + R);
   }
 
   if (meta.name) {
-    parts.push(TAG_TXT + `"${meta.name}"` + R);
+    parts.push(theme.tagText + `"${meta.name}"` + R);
   } else if (meta.topic && !isNew) {
-    parts.push(TAG_TXT + `"${meta.topic}"` + R);
+    parts.push(theme.tagText + `"${meta.topic}"` + R);
   }
 
   if (meta.messageCount > 0) {
-    parts.push(DESC_CLR + `${meta.messageCount} msgs` + R);
+    parts.push(theme.desc + `${meta.messageCount} msgs` + R);
   }
 
   if (meta.lastActive && !isNew) {
-    parts.push(DESC_CLR + relativeTime(meta.lastActive) + R);
+    parts.push(theme.desc + relativeTime(meta.lastActive) + R);
   }
 
-  parts.push(TAG_PI + meta.model + R);
+  parts.push(theme.tagPi + meta.model + R);
 
   return parts.join(dot);
 }
@@ -214,12 +213,13 @@ const PIZZA_ART = [
   "         ╵  ┃╵  │          ", //  9  drips
 ];
 
-const PIZZA_LETTERS: { lines: string[]; clr: string }[] = [
-  { lines: ["╔═══╗ ", "║   ║ ", "╠═══╝ ", "║     ", "╩     "], clr: CLR_P },
-  { lines: ["═╦═ ", " ║  ", " ║  ", " ║  ", "═╩═ "], clr: CLR_I },
-  { lines: ["╔═════╗ ", "    ╔═╝ ", "  ╔═╝   ", "╔═╝     ", "╚═════╝ "], clr: CLR_Z1 },
-  { lines: ["╔═════╗ ", "    ╔═╝ ", "  ╔═╝   ", "╔═╝     ", "╚═════╝ "], clr: CLR_Z2 },
-  { lines: ["╔═══╗", "║   ║", "╠═══╣", "║   ║", "╩   ╩"], clr: CLR_A },
+type LetterToken = "letterP" | "letterI" | "letterZ1" | "letterZ2" | "letterA";
+const PIZZA_LETTERS: { lines: string[]; token: LetterToken }[] = [
+  { lines: ["╔═══╗ ", "║   ║ ", "╠═══╝ ", "║     ", "╩     "], token: "letterP" },
+  { lines: ["═╦═ ", " ║  ", " ║  ", " ║  ", "═╩═ "], token: "letterI" },
+  { lines: ["╔═════╗ ", "    ╔═╝ ", "  ╔═╝   ", "╔═╝     ", "╚═════╝ "], token: "letterZ1" },
+  { lines: ["╔═════╗ ", "    ╔═╝ ", "  ╔═╝   ", "╔═╝     ", "╚═════╝ "], token: "letterZ2" },
+  { lines: ["╔═══╗", "║   ║", "╠═══╣", "║   ║", "╩   ╩"], token: "letterA" },
 ];
 
 // Two-column shortcut grid: [left_key, left_desc, right_key, right_desc]
@@ -243,6 +243,7 @@ const COMMANDS: [string, string][] = [
 // ── Column builders ─────────────────────────────────────────
 
 function buildLeftColumn(): string[] {
+  const theme = getPizzaTheme();
   const pizza = PIZZA_ART.map(colorizePizza);
   const GAP = "  ";
   const TEXT_ROW = 2;
@@ -250,8 +251,8 @@ function buildLeftColumn(): string[] {
   const textLines: string[] = [];
   for (let row = 0; row < 5; row++) {
     let line = "";
-    for (const { lines, clr } of PIZZA_LETTERS) {
-      line += clr + lines[row] + R;
+    for (const { lines, token } of PIZZA_LETTERS) {
+      line += theme[token] + lines[row] + R;
     }
     textLines.push(line);
   }
@@ -263,7 +264,7 @@ function buildLeftColumn(): string[] {
       content.push(pizza[i] + GAP + textLines[ti]);
     } else if (i === 7) {
       content.push(
-        pizza[i] + GAP + TAG_PI + "Pi " + R + TAG_TXT + "with toppings" + R,
+        pizza[i] + GAP + theme.tagPi + "Pi " + R + theme.tagText + "with toppings" + R,
       );
     } else {
       content.push(pizza[i]);
@@ -273,22 +274,24 @@ function buildLeftColumn(): string[] {
 }
 
 function buildSectionRule(width: number, label: string): string {
+  const theme = getPizzaTheme();
   const text = ` ${label.toUpperCase()} `;
   if (width <= text.length) {
-    return SECTION_CLR + text.slice(0, width) + R;
+    return theme.section + text.slice(0, width) + R;
   }
   const left = Math.floor((width - text.length) / 2);
   const right = width - text.length - left;
   return (
-    DIV_CLR + "─".repeat(left) + R +
-    SECTION_CLR + text + R +
-    DIV_CLR + "─".repeat(right) + R
+    theme.divider + "─".repeat(left) + R +
+    theme.section + text + R +
+    theme.divider + "─".repeat(right) + R
   );
 }
 
 function buildCommandsLine(rowW: number): string {
+  const theme = getPizzaTheme();
   const segments = COMMANDS.map(
-    ([key, desc]) => KEY_CLR + key + R + " " + DESC_CLR + desc + R,
+    ([key, desc]) => theme.key + key + R + " " + theme.desc + desc + R,
   );
   const visibleSegments = COMMANDS.map(([key, desc]) => `${key} ${desc}`);
   const contentW = visibleSegments.reduce((sum, segment) => sum + segment.length, 0);
@@ -308,6 +311,7 @@ function buildCommandsLine(rowW: number): string {
 }
 
 function buildRightColumn(): string[] {
+  const theme = getPizzaTheme();
   const lkW = Math.max(...SHORTCUTS.map((s) => s[0].length));
   const ldW = Math.max(...SHORTCUTS.map((s) => s[1].length));
   const rkW = Math.max(...SHORTCUTS.map((s) => s[2].length));
@@ -317,10 +321,10 @@ function buildRightColumn(): string[] {
   const lines: string[] = [buildSectionRule(rowW, "shortcuts")];
   for (const [lk, ld, rk, rd] of SHORTCUTS) {
     lines.push(
-      KEY_CLR + lk.padEnd(lkW) + R + " " +
-      DESC_CLR + ld.padEnd(ldW) + R + "   " +
-      KEY_CLR + rk.padEnd(rkW) + R + " " +
-      DESC_CLR + rd.padEnd(rdW) + R,
+      theme.key + lk.padEnd(lkW) + R + " " +
+      theme.desc + ld.padEnd(ldW) + R + "   " +
+      theme.key + rk.padEnd(rkW) + R + " " +
+      theme.desc + rd.padEnd(rdW) + R,
     );
   }
 
@@ -336,28 +340,31 @@ function buildRightColumn(): string[] {
 // ── Banner assembly ─────────────────────────────────────────
 
 function buildTopBorder(totalW: number): string {
+  const theme = getPizzaTheme();
   const titleVis = `── pizza v${VERSION} ── pi v${PI_VERSION} `;
   const fill = Math.max(0, totalW - 2 - titleVis.length);
   return (
-    BORDER_CLR + "╭── " + R +
-    TAG_PI + "pizza " + R +
-    TAG_TXT + "v" + VERSION + R + " " +
-    BORDER_CLR + "── " + R +
-    TAG_TXT + "pi v" + PI_VERSION + R + " " +
-    BORDER_CLR + "─".repeat(fill) + "╮" + R
+    theme.border + "╭── " + R +
+    theme.tagPi + "pizza " + R +
+    theme.tagText + "v" + VERSION + R + " " +
+    theme.border + "── " + R +
+    theme.tagText + "pi v" + PI_VERSION + R + " " +
+    theme.border + "─".repeat(fill) + "╮" + R
   );
 }
 
 function buildBotBorder(totalW: number): string {
-  return BORDER_CLR + "╰" + "─".repeat(totalW - 2) + "╯" + R;
+  const theme = getPizzaTheme();
+  return theme.border + "╰" + "─".repeat(totalW - 2) + "╯" + R;
 }
 
 function fullWidthRow(content: string, totalW: number): string {
-  const innerW = totalW - 4;
+  const theme = getPizzaTheme();
+  const innerW = Math.max(0, totalW - 4);
   return (
-    BORDER_CLR + "│" + R + " " +
-    padRight(content, innerW) + " " +
-    BORDER_CLR + "│" + R
+    theme.border + "│" + R + " " +
+    fitExact(content, innerW) + " " +
+    theme.border + "│" + R
   );
 }
 
@@ -367,8 +374,8 @@ const TWO_COL_OVERHEAD = 5 + CENTER_PAD.length * 2;
 function buildBanner(viewWidth: number, meta: SessionMeta): string[] {
   const leftLines = buildLeftColumn();
   const rightLines = buildRightColumn();
-  const leftW = Math.max(...leftLines.map((l) => stripAnsi(l).length));
-  const rightW = Math.max(...rightLines.map((l) => stripAnsi(l).length));
+  const leftW = Math.max(...leftLines.map((l) => visibleWidth(l)));
+  const rightW = Math.max(...rightLines.map((l) => visibleWidth(l)));
 
   // Two-column row: │ left  │  right │
   const minTwoCol = leftW + rightW + TWO_COL_OVERHEAD;
@@ -386,6 +393,7 @@ function assembleTwoCol(
   totalW: number,
   meta: SessionMeta,
 ): string[] {
+  const theme = getPizzaTheme();
   const rW = totalW - leftW - TWO_COL_OVERHEAD;
   const rows: string[] = [buildTopBorder(totalW)];
 
@@ -398,11 +406,11 @@ function assembleTwoCol(
     const l = i < leftLines.length ? leftLines[i] : "";
     const r = i < rightLines.length ? rightLines[i] : "";
     rows.push(
-      BORDER_CLR + "│" + R + " " +
-      padRight(l, leftW) + CENTER_PAD +
-      BORDER_CLR + "│" + R + CENTER_PAD +
-      padRight(r, rW) + " " +
-      BORDER_CLR + "│" + R,
+      theme.border + "│" + R + " " +
+      fitExact(l, leftW) + CENTER_PAD +
+      theme.border + "│" + R + CENTER_PAD +
+      fitExact(r, rW) + " " +
+      theme.border + "│" + R,
     );
   }
 
@@ -424,6 +432,7 @@ function assembleStacked(
   viewWidth: number,
   meta: SessionMeta,
 ): string[] {
+  const theme = getPizzaTheme();
   const contentW = Math.max(leftW, rightW);
   const totalW = Math.max(contentW + 4, viewWidth);
   const inner = totalW - 4;
@@ -437,7 +446,7 @@ function assembleStacked(
     rows.push(fullWidthRow(l, totalW));
   }
 
-  rows.push(BORDER_CLR + "├" + "─".repeat(totalW - 2) + "┤" + R);
+  rows.push(theme.border + "├" + "─".repeat(totalW - 2) + "┤" + R);
 
   for (const r of rightLines) {
     rows.push(fullWidthRow(r, totalW));
@@ -486,6 +495,34 @@ class PizzaHeader {
   }
 }
 
+/**
+ * Mirror the active Pi theme into Pizza. Pi is the single source of truth —
+ * `/pizza theme X` and Pi's own `/theme X` both land in `ctx.ui.theme.name`,
+ * and this function brings Pizza in line with it. If Pi's theme has a
+ * registered Pizza palette (bundled or discovered via `getAllThemes`), use it;
+ * otherwise, derive from Pi's colors via FALLBACK_FROM_PI_COLOR in
+ * pizza-theme.ts by registering whatever JSON path Pi exposes.
+ */
+function syncPizzaThemeFromPi(ctx: any): boolean {
+  const piThemeName: string | undefined = ctx?.ui?.theme?.name;
+
+  // Opportunistically register any theme path Pi knows about so pizza can
+  // follow custom/user themes, not just the two we bundle.
+  const allThemes: Array<{ name: string; path?: string }> =
+    ctx?.ui?.getAllThemes?.() ?? [];
+  for (const { name, path } of allThemes) {
+    if (path && !hasPizzaTheme(name)) {
+      registerPizzaThemePath(name, path);
+    }
+  }
+
+  const target =
+    piThemeName && hasPizzaTheme(piThemeName) ? piThemeName : DEFAULT_PIZZA_THEME;
+  if (target === getActivePizzaThemeName()) return false;
+  setActivePizzaTheme(target);
+  return true;
+}
+
 function setOrUpdateHeader(ctx: any, reason?: string): void {
   if (!ctx?.hasUI) return;
 
@@ -516,11 +553,16 @@ export default function pizzaUiExtension(pi: ExtensionAPI): void {
     maybeWarnAboutPiCompatibility(ctx, PI_VERSION);
     if (!ctx.hasUI) return;
 
+    syncPizzaThemeFromPi(ctx);
     ctx.ui.setTitle(`pizza \u00B7 ${basename(ctx.cwd)}`);
     setOrUpdateHeader(ctx, event?.reason);
   });
 
   pi.on("turn_end", async (_event, ctx) => {
+    if (syncPizzaThemeFromPi(ctx)) {
+      const state = HEADER_STATES.get(ctx.sessionManager as object);
+      state?.header.invalidate();
+    }
     setOrUpdateHeader(ctx);
   });
 
@@ -529,8 +571,14 @@ export default function pizzaUiExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("pizza", {
-    description: "Show Pizza configuration and status",
-    handler: async (_args, ctx) => {
+    description: "Show Pizza status, or run `theme` to change the theme",
+    handler: async (args, ctx) => {
+      const tokens = (args ?? "").trim().split(/\s+/).filter(Boolean);
+      if (tokens[0] === "theme") {
+        await runThemeCommand(tokens.slice(1), ctx);
+        return;
+      }
+
       const model = formatModelLabel(ctx.model) ?? "default";
       const usage = ctx.getContextUsage();
       const lines = [
@@ -538,15 +586,76 @@ export default function pizzaUiExtension(pi: ExtensionAPI): void {
         `Pi: ${getPiCompatibilitySummary(PI_VERSION)}`,
         `Model: ${model}`,
         `CWD: ${ctx.cwd}`,
+        `Theme: ${getActivePizzaThemeName()}`,
       ];
       if (usage?.percent != null) {
         lines.push(`Context: ${usage.percent}%`);
       }
-      if (ctx.hasUI) {
-        ctx.ui.notify(lines.join("\n"), "info");
-      } else {
-        console.log(lines.join("\n"));
-      }
+      emit(ctx, lines, "info");
     },
   });
+}
+
+function emit(ctx: any, lines: string[], level: "info" | "warning"): void {
+  const msg = lines.join("\n");
+  if (ctx?.hasUI && ctx.ui) ctx.ui.notify(msg, level);
+  else console.log(msg);
+}
+
+function listAvailableThemes(ctx: any): string[] {
+  const piThemes: Array<{ name: string }> = ctx?.ui?.getAllThemes?.() ?? [];
+  const names = new Set<string>(listPizzaThemes());
+  for (const { name } of piThemes) names.add(name);
+  return Array.from(names).sort();
+}
+
+async function runThemeCommand(tokens: string[], ctx: any): Promise<void> {
+  syncPizzaThemeFromPi(ctx); // ensure any newly-registered themes are known
+  const themes = listAvailableThemes(ctx);
+  const active = ctx?.ui?.theme?.name ?? getActivePizzaThemeName();
+
+  let target: string;
+  if (tokens.length === 0) {
+    if (!ctx?.hasUI || typeof ctx.ui?.select !== "function") {
+      const lines = [
+        "\u{1F355} pizza themes:",
+        ...themes.map((n) => `  ${n === active ? "\u2192" : " "} ${n}`),
+        "",
+        "/pizza theme <name>   switch Pi and Pizza together",
+      ];
+      emit(ctx, lines, "info");
+      return;
+    }
+    const picked = await ctx.ui.select(
+      `\u{1F355} Pick a theme (current: ${active})`,
+      themes,
+    );
+    if (picked === undefined) return; // user cancelled
+    target = picked;
+  } else {
+    target = tokens[0];
+  }
+
+  if (!themes.includes(target)) {
+    emit(
+      ctx,
+      [`Unknown theme: ${target}`, `Available: ${themes.join(", ")}`],
+      "warning",
+    );
+    return;
+  }
+
+  if (target === active) {
+    emit(ctx, [`Theme: ${target} (unchanged)`], "info");
+    return;
+  }
+
+  const result = ctx?.ui?.setTheme?.(target) ?? { success: false, error: "no UI" };
+  if (!result.success) {
+    emit(ctx, [`Failed to apply theme: ${result.error ?? "unknown error"}`], "warning");
+    return;
+  }
+  syncPizzaThemeFromPi(ctx);
+  setOrUpdateHeader(ctx);
+  emit(ctx, [`Theme: ${target}`], "info");
 }

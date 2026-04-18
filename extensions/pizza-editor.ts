@@ -4,16 +4,18 @@ import {
   CustomEditor,
 } from "@mariozechner/pi-coding-agent";
 import type { EditorTheme, TUI } from "@mariozechner/pi-tui";
-
-const R = "\x1b[0m";
-const PIZZA_ORANGE = "\x1b[38;5;209m";
+import { getPizzaTheme, paint } from "./shared/pizza-theme.ts";
 
 export function isBashInput(text: string): boolean {
   return text.trimStart().startsWith("!");
 }
 
-function pizzaOrange(text: string): string {
-  return `${PIZZA_ORANGE}${text}${R}`;
+function bashBorder(text: string): string {
+  return paint(getPizzaTheme().bashBorder, text);
+}
+
+function normalBorder(text: string): string {
+  return paint(getPizzaTheme().normalBorder, text);
 }
 
 class PizzaEditor extends CustomEditor {
@@ -51,11 +53,11 @@ export default function pizzaEditorExtension(pi: ExtensionAPI): void {
     ctx.ui.setEditorComponent((tui, theme, keybindings) => {
       const editorTheme: EditorTheme = {
         ...theme,
-        borderColor: (text) => ctx.ui.theme.fg("dim", text),
+        borderColor: normalBorder,
       };
       return new PizzaEditor(tui, editorTheme, keybindings, {
-        normalBorderColor: (text) => ctx.ui.theme.fg("dim", text),
-        bashBorderColor: pizzaOrange,
+        normalBorderColor: normalBorder,
+        bashBorderColor: bashBorder,
       });
     });
   });
