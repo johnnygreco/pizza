@@ -458,9 +458,14 @@ function assembleStacked(
 class PizzaHeader {
   private meta: SessionMeta;
   private cache?: { width: number; lines: string[] };
+  private requestRender?: () => void;
 
   constructor(meta: SessionMeta) {
     this.meta = meta;
+  }
+
+  attach(tui: { requestRender?: () => void } | undefined): void {
+    this.requestRender = tui?.requestRender?.bind(tui);
   }
 
   render(width: number): string[] {
@@ -477,6 +482,7 @@ class PizzaHeader {
   update(meta: SessionMeta): void {
     this.meta = meta;
     this.invalidate();
+    this.requestRender?.();
   }
 }
 
@@ -493,13 +499,15 @@ function setOrUpdateHeader(ctx: any, reason?: string): void {
   if (existing) {
     existing.reason = effectiveReason;
     existing.header.update(meta);
-    ctx.ui.setHeader((_tui: unknown, _theme: unknown) => existing.header);
     return;
   }
 
   const header = new PizzaHeader(meta);
   HEADER_STATES.set(sessionManager, { header, reason: effectiveReason });
-  ctx.ui.setHeader((_tui: unknown, _theme: unknown) => header);
+  ctx.ui.setHeader((tui: { requestRender?: () => void }, _theme: unknown) => {
+    header.attach(tui);
+    return header;
+  });
 }
 
 // ── Extension entry point ────────────────────────────────────

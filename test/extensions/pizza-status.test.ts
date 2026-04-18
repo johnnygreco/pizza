@@ -123,8 +123,7 @@ describe("pizza-status extension", () => {
     const [, raw] = ctx.ui.setStatus.mock.calls[0];
     const output = stripAnsi(raw);
 
-    expect(output).toContain("🍕 ▕██████░░░░░░▏");
-    expect(output).toContain("▕██████░░░░░░▏");
+    expect(output).toContain("🍕 ██████████░░░░░░░░░░");
     expect(output).toContain("50.0%/200k (auto)");
     expect(output).toContain("Anthropic: sonnet");
     expect(output).not.toContain("lunch rush");
@@ -140,7 +139,7 @@ describe("pizza-status extension", () => {
     const [, raw] = ctx.ui.setStatus.mock.calls[0];
     const output = stripAnsi(raw);
 
-    expect(output).toContain("▕███████████░▏");
+    expect(output).toContain("███████████████████░");
     expect(output).toContain("96.0%/200k (auto)");
     expect(output).not.toContain("last slice");
   });

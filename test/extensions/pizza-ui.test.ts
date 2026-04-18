@@ -272,6 +272,41 @@ describe("pizza-ui extension", () => {
     expect(output).not.toContain("Anthropic: sonnet");
   });
 
+  it("reuses the same header component across updates", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true, {
+      model: { id: "claude-sonnet-4-20250514", name: "sonnet", provider: "anthropic" },
+      entries: [
+        {
+          type: "message",
+          id: "1",
+          parentId: null,
+          timestamp: new Date().toISOString(),
+          message: { role: "user", content: "Inspect the banner updates" },
+        },
+      ],
+    });
+
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+    const factory = ctx.ui.setHeader.mock.calls[0][0] as Function;
+    const tui = { requestRender: vi.fn() };
+    const header = factory(tui, null);
+
+    ctx.model = {
+      id: "anthropic/claude-opus-4.6",
+      name: "Anthropic: Claude Opus 4.6",
+      provider: "openrouter",
+    };
+    await registeredEvents.get("model_select")![0]({}, ctx);
+    await registeredEvents.get("turn_end")![0]({}, ctx);
+
+    expect(ctx.ui.setHeader).toHaveBeenCalledTimes(1);
+    expect(tui.requestRender).toHaveBeenCalledTimes(2);
+    expect(header.render(120).join("\n")).toContain("OpenRouter: Claude Opus 4.6");
+  });
+
   it("shows topic from first user message when no session name", async () => {
     const { api, registeredEvents } = createMockApi();
     pizzaUiExtension(api as any);
