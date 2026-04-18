@@ -52,7 +52,7 @@
 		"pizza.dim": "#5f5f5f",
 
 		"pizza.bashBorder": "limeGlow",
-		"pizza.normalBorder": "#5f5f5f"
+		"pizza.normalBorder": "#808080"
 	},
 	"colors": {
 		"accent": "neonPink",

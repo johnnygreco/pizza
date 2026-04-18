@@ -53,7 +53,7 @@
 		"pizza.dim": "sauceDim",
 
 		"pizza.bashBorder": "pizzaOrange",
-		"pizza.normalBorder": "sauceDim"
+		"pizza.normalBorder": "#808080"
 	},
 	"colors": {
 		"accent": "pizzaOrange",

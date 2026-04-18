@@ -167,7 +167,12 @@ function buildStatsText(ctx: ExtensionContext): string {
 	return parts.join(" ");
 }
 
-function buildPwdLine(ctx: ExtensionContext, width: number, theme: FooterTheme, footerData: ReadonlyFooterDataProvider): string {
+// Neutral grey for the pwd/stats line directly under the message box — kept
+// theme-independent so the chrome around the editor reads as chrome, not decor.
+const GREY = "\x1b[38;5;244m";
+const grey = (text: string): string => `${GREY}${text}${ANSI_RESET}`;
+
+function buildPwdLine(ctx: ExtensionContext, width: number, _theme: FooterTheme, footerData: ReadonlyFooterDataProvider): string {
 	let pwd = ctx.cwd;
 	const home = process.env.HOME || process.env.USERPROFILE;
 	if (home && pwd.startsWith(home)) {
@@ -186,28 +191,28 @@ function buildPwdLine(ctx: ExtensionContext, width: number, theme: FooterTheme, 
 
 	const stats = buildStatsText(ctx);
 	if (!stats) {
-		return truncateToWidth(theme.fg("dim", pwd), width, theme.fg("dim", "..."));
+		return truncateToWidth(grey(pwd), width, grey("..."));
 	}
 
 	const statsWidth = visibleWidth(stats);
 	if (statsWidth >= width) {
-		return theme.fg("dim", truncateToWidth(stats, width, "..."));
+		return grey(truncateToWidth(stats, width, "..."));
 	}
 
 	const pwdWidth = visibleWidth(pwd);
 	if (pwdWidth + 1 + statsWidth <= width) {
 		const gap = " ".repeat(width - pwdWidth - statsWidth);
-		return theme.fg("dim", pwd) + gap + theme.fg("dim", stats);
+		return grey(pwd) + gap + grey(stats);
 	}
 
 	const maxPwdWidth = Math.max(0, width - statsWidth - 1);
 	if (maxPwdWidth <= 0) {
-		return theme.fg("dim", truncateToWidth(stats, width, "..."));
+		return grey(truncateToWidth(stats, width, "..."));
 	}
 
 	const truncatedPwd = truncateToWidth(pwd, maxPwdWidth, "...");
 	const gap = " ".repeat(Math.max(1, width - visibleWidth(truncatedPwd) - statsWidth));
-	return theme.fg("dim", truncatedPwd) + gap + theme.fg("dim", stats);
+	return grey(truncatedPwd) + gap + grey(stats);
 }
 
 function buildFooterLines(
