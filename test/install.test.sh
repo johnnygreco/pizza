@@ -47,10 +47,12 @@ M
 
     # ── Pizza tarball fixture (matches release artifact structure) ──
     local pkg="$TEST_DIR/fixture/pizza-0.99.0"
-    mkdir -p "$pkg/extensions" "$pkg/skills" "$pkg/prompts" "$pkg/agents"
+    mkdir -p "$pkg/extensions/shared/themes" "$pkg/skills" "$pkg/prompts" "$pkg/agents"
     echo '{}' > "$pkg/extensions/stub.json"
     echo '{}' > "$pkg/skills/stub.json"
     echo '{}' > "$pkg/prompts/stub.json"
+    echo '{"name":"alpha"}' > "$pkg/extensions/shared/themes/alpha.json"
+    echo '{"name":"beta"}'  > "$pkg/extensions/shared/themes/beta.json"
     cat > "$pkg/package.json" << 'PKG'
 {
   "name": "pizza",
@@ -640,6 +642,134 @@ test_uninstall_nonexistent() {
     destroy_env
 }
 
+# ═══════════════════════════════════════════════════════════════════════
+# Tests: theme symlinks
+# ═══════════════════════════════════════════════════════════════════════
+
+# Assert $1 is a symlink whose target equals $2.
+assert_symlink_to() {
+    local label="$1" link="$2" expected="$3"
+    if [ ! -L "$link" ]; then
+        fail "$label" "$link is not a symlink"
+        return
+    fi
+    local actual
+    actual="$(readlink "$link")"
+    if [ "$actual" = "$expected" ]; then
+        pass "$label"
+    else
+        fail "$label" "expected $expected, got $actual"
+    fi
+}
+
+test_themes_symlinked_into_pi() {
+    echo "Install symlinks every shipped theme into pi's themes dir"
+    create_env
+    mock_pi "0.67.1"
+
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+
+    local themes_dir="$TEST_DIR/home/.pi/agent/themes"
+    local src="$TEST_DIR/target/extensions/shared/themes"
+    assert_symlink_to "alpha.json symlinked" "$themes_dir/alpha.json" "$src/alpha.json"
+    assert_symlink_to "beta.json symlinked"  "$themes_dir/beta.json"  "$src/beta.json"
+
+    destroy_env
+}
+
+test_theme_symlink_skips_user_files() {
+    echo "Theme symlink skips an existing user-owned file"
+    create_env
+    mock_pi "0.67.1"
+
+    # Pre-create a user-owned theme at a name we also ship.
+    local themes_dir="$TEST_DIR/home/.pi/agent/themes"
+    mkdir -p "$themes_dir"
+    echo '{"name":"my-alpha"}' > "$themes_dir/alpha.json"
+
+    local out rc=0
+    out="$(run_installer --version 0.99.0)" || rc=$?
+
+    assert_exits_zero "exits zero" "$rc"
+
+    # User file preserved, not replaced by a symlink
+    if [ -L "$themes_dir/alpha.json" ]; then
+        fail "user theme file was replaced by a symlink"
+    else
+        pass "user theme file not replaced"
+    fi
+    assert_file_contains "user file content preserved" "$themes_dir/alpha.json" "my-alpha"
+    assert_output_contains "warns about skip" "$out" "Skipping alpha.json"
+
+    # Other themes still linked
+    local src="$TEST_DIR/target/extensions/shared/themes"
+    assert_symlink_to "beta.json still symlinked" "$themes_dir/beta.json" "$src/beta.json"
+
+    destroy_env
+}
+
+test_uninstall_removes_theme_symlinks() {
+    echo "Uninstall removes pizza theme symlinks but leaves user files alone"
+    create_env
+    mock_pi "0.67.1"
+
+    local themes_dir="$TEST_DIR/home/.pi/agent/themes"
+    mkdir -p "$themes_dir"
+    # User's own theme co-existing with pizza's bundled ones
+    echo '{"name":"mine"}' > "$themes_dir/mine.json"
+
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+
+    # Sanity: pizza symlinks exist before uninstall
+    [ -L "$themes_dir/alpha.json" ] || fail "precondition: alpha symlink should exist"
+    [ -L "$themes_dir/beta.json" ]  || fail "precondition: beta symlink should exist"
+
+    run_installer --uninstall >/dev/null 2>&1 || true
+
+    if [ -e "$themes_dir/alpha.json" ]; then
+        fail "alpha.json symlink should be removed on uninstall"
+    else
+        pass "alpha.json symlink removed on uninstall"
+    fi
+    if [ -e "$themes_dir/beta.json" ]; then
+        fail "beta.json symlink should be removed on uninstall"
+    else
+        pass "beta.json symlink removed on uninstall"
+    fi
+    assert_file_exists "user-owned theme preserved" "$themes_dir/mine.json"
+    assert_file_contains "user theme content intact" "$themes_dir/mine.json" "mine"
+
+    destroy_env
+}
+
+test_reinstall_refreshes_theme_symlinks() {
+    echo "Reinstall removes stale pizza theme symlinks and re-links current ones"
+    create_env
+    mock_pi "0.67.1"
+
+    # First install
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+
+    local themes_dir="$TEST_DIR/home/.pi/agent/themes"
+    local src="$TEST_DIR/target/extensions/shared/themes"
+
+    # Simulate a stale pizza-owned symlink for a theme no longer shipped.
+    ln -sf "$src/gamma.json" "$themes_dir/gamma.json"
+
+    # Reinstall
+    run_installer --version 0.99.0 >/dev/null 2>&1 || true
+
+    if [ -L "$themes_dir/gamma.json" ]; then
+        fail "stale pizza theme symlink should be removed on reinstall"
+    else
+        pass "stale pizza theme symlink removed"
+    fi
+    assert_symlink_to "alpha.json re-linked after reinstall" "$themes_dir/alpha.json" "$src/alpha.json"
+    assert_symlink_to "beta.json re-linked after reinstall"  "$themes_dir/beta.json"  "$src/beta.json"
+
+    destroy_env
+}
+
 # ── Helper: read one key from a JSON file via node ────────────────────────
 json_get() {
     local file="$1" key="$2"
@@ -953,6 +1083,16 @@ main() {
     test_uninstall_removes_directory
     echo ""
     test_uninstall_nonexistent
+
+    echo ""
+    echo "--- Themes ---"
+    test_themes_symlinked_into_pi
+    echo ""
+    test_theme_symlink_skips_user_files
+    echo ""
+    test_uninstall_removes_theme_symlinks
+    echo ""
+    test_reinstall_refreshes_theme_symlinks
 
     echo ""
     echo "--- Pi settings ---"
