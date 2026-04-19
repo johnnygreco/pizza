@@ -119,9 +119,9 @@ onPizzaThemeChange(() => {
 // ── Resources (skills / prompts / extensions / themes) ──────
 // Collected once per header rebuild and passed into buildBanner so the pinned
 // banner can summarize what Pi loaded at boot — and, when expanded, list the
-// names grouped by source. Expansion is a module-level flag because there's
-// one visual banner across the process; per-session toggling wouldn't map to
-// anything users can see differently.
+// names grouped by source. Section expansion state is module-level (resources
+// + shortcuts) because there's one visual banner across the process;
+// per-session toggling wouldn't map to anything users can see differently.
 
 interface ResourceList {
   skills: string[];
@@ -131,6 +131,7 @@ interface ResourceList {
 }
 
 let resourcesExpanded = false;
+let shortcutsExpanded = true;
 
 // `pi` (ExtensionAPI) is captured at registration so we can read getCommands()
 // during event handling. Only ExtensionAPI exposes getCommands — ExtensionContext
@@ -355,15 +356,16 @@ function buildCommandsLine(rowW: number): string {
   return line;
 }
 
-function buildRightColumn(): string[] {
+function buildShortcutsPanel(): string[] {
   const theme = getPizzaTheme();
   const lkW = Math.max(...SHORTCUTS.map((s) => s[0].length));
   const ldW = Math.max(...SHORTCUTS.map((s) => s[1].length));
   const rkW = Math.max(...SHORTCUTS.map((s) => s[2].length));
   const rdW = Math.max(...SHORTCUTS.map((s) => s[3].length));
   const rowW = lkW + 1 + ldW + 3 + rkW + 1 + rdW;
+  const heading = theme.section + "▾ shortcuts + prefixes" + R;
 
-  const lines: string[] = [buildSectionRule(rowW, "shortcuts")];
+  const lines: string[] = [heading, buildSectionRule(rowW, "shortcuts")];
   for (const [lk, ld, rk, rd] of SHORTCUTS) {
     lines.push(
       theme.key + lk.padEnd(lkW) + R + " " +
@@ -373,10 +375,7 @@ function buildRightColumn(): string[] {
     );
   }
 
-  // Separator
   lines.push(buildSectionRule(rowW, "prefixes"));
-
-  // Commands
   lines.push(buildCommandsLine(rowW));
 
   return lines;
@@ -413,62 +412,24 @@ function fullWidthRow(content: string, totalW: number): string {
   );
 }
 
-const CENTER_PAD = "  ";
-const TWO_COL_OVERHEAD = 5 + CENTER_PAD.length * 2;
-
-function buildBanner(
-  viewWidth: number,
-  meta: SessionMeta,
-  resources: ResourceList,
-  expanded: boolean,
-): string[] {
-  const leftLines = buildLeftColumn();
-  const rightLines = buildRightColumn();
-  const leftW = Math.max(...leftLines.map((l) => visibleWidth(l)));
-  const rightW = Math.max(...rightLines.map((l) => visibleWidth(l)));
-
-  // Two-column row: │ left  │  right │
-  const minTwoCol = leftW + rightW + TWO_COL_OVERHEAD;
-
-  if (viewWidth >= minTwoCol) {
-    return assembleTwoCol(leftLines, leftW, rightLines, viewWidth, meta, resources, expanded);
-  }
-  return assembleStacked(leftLines, leftW, rightLines, rightW, viewWidth, meta, resources, expanded);
-}
+const PANEL_SEP_VIS = 3;
 
 // ── Resources section ───────────────────────────────────────
 
 function buildResourcesLines(
   resources: ResourceList,
-  expanded: boolean,
-  innerW: number,
+  panelW: number,
 ): string[] {
   const theme = getPizzaTheme();
-  const dot = " " + theme.divider + "·" + R + " ";
-  const arrow = expanded ? "▾" : "▸";
   const heading =
-    theme.section + arrow + " resources" + R;
-
-  if (!expanded) {
-    const counts: Array<[string, number]> = [
-      ["skills", resources.skills.length],
-      ["prompts", resources.prompts.length],
-      ["ext", resources.extensions.length],
-      ["themes", resources.themes.length],
-    ];
-    const body = counts
-      .map(([label, n]) => theme.key + label + R + " " + theme.desc + n + R)
-      .join(dot);
-    const hint = theme.dim + "(/pizza resources)" + R;
-    return [`${heading}  ${body}  ${hint}`];
-  }
+    theme.section + "▾ resources" + R;
 
   const lines: string[] = [heading];
-  const labelW = 10; // widest label + colon = "extensions:"
+  const labelW = 12; // widest label + colon = "extensions:"
   const categories: Array<[string, string[]]> = [
     ["skills", resources.skills],
     ["prompts", resources.prompts],
-    ["ext", resources.extensions],
+    ["extensions", resources.extensions],
     ["themes", resources.themes],
   ];
   for (const [label, items] of categories) {
@@ -480,8 +441,7 @@ function buildResourcesLines(
       lines.push(header + theme.dim + "—" + R);
       continue;
     }
-    // -1 accounts for the leading-space indent fullWidthRow adds on each row.
-    const remaining = Math.max(8, innerW - headerVis - 1);
+    const remaining = Math.max(8, panelW - headerVis);
     const continuationIndent = " ".repeat(headerVis);
 
     const wrappedBodies: string[] = [];
@@ -505,95 +465,185 @@ function buildResourcesLines(
   return lines;
 }
 
-function assembleTwoCol(
-  leftLines: string[],
-  leftW: number,
-  rightLines: string[],
-  totalW: number,
-  meta: SessionMeta,
-  resources: ResourceList,
-  expanded: boolean,
-): string[] {
-  const theme = getPizzaTheme();
-  const rW = totalW - leftW - TWO_COL_OVERHEAD;
-  const rows: string[] = [buildTopBorder(totalW)];
+type BannerPanel = {
+  key: "logo" | "shortcuts" | "resources";
+  lines: string[];
+  width: number;
+};
 
-  // Top padding
-  rows.push(fullWidthRow("", totalW));
+type PlacedPanel = BannerPanel & { clampedWidth: number };
 
-  // Two-column content
-  const maxRows = Math.max(leftLines.length, rightLines.length);
-  for (let i = 0; i < maxRows; i++) {
-    const l = i < leftLines.length ? leftLines[i] : "";
-    const r = i < rightLines.length ? rightLines[i] : "";
-    rows.push(
-      theme.border + "│" + R + " " +
-      fitExact(l, leftW) + CENTER_PAD +
-      theme.border + "│" + R + CENTER_PAD +
-      fitExact(r, rW) + " " +
-      theme.border + "│" + R,
-    );
+function maxLineWidth(lines: string[]): number {
+  if (lines.length === 0) return 0;
+  return Math.max(...lines.map((line) => visibleWidth(line)));
+}
+
+function groupPanelsIntoRows(panels: BannerPanel[], innerW: number): PlacedPanel[][] {
+  if (panels.length === 0) return [];
+  if (innerW <= 0) {
+    return panels.map((panel) => [{ ...panel, clampedWidth: 0 }]);
   }
 
-  // Resources section (full width)
-  rows.push(fullWidthRow("", totalW));
-  const innerW = Math.max(0, totalW - 4);
-  for (const line of buildResourcesLines(resources, expanded, innerW)) {
-    rows.push(fullWidthRow(" " + line, totalW));
+  const rows: PlacedPanel[][] = [];
+  let currentRow: PlacedPanel[] = [];
+  let used = 0;
+
+  for (const panel of panels) {
+    const clampedWidth = Math.min(panel.width, innerW);
+    const needed = currentRow.length === 0 ? clampedWidth : PANEL_SEP_VIS + clampedWidth;
+
+    if (currentRow.length > 0 && used + needed > innerW) {
+      rows.push(currentRow);
+      currentRow = [{ ...panel, clampedWidth }];
+      used = clampedWidth;
+      continue;
+    }
+
+    currentRow.push({ ...panel, clampedWidth });
+    used += needed;
   }
 
-  // Padding before session meta
-  rows.push(fullWidthRow("", totalW));
-
-  // Session metadata (full width)
-  rows.push(fullWidthRow(" " + formatSessionMeta(meta), totalW));
-
-  rows.push(buildBotBorder(totalW));
+  if (currentRow.length > 0) rows.push(currentRow);
   return rows;
 }
 
-function assembleStacked(
-  leftLines: string[],
-  leftW: number,
-  rightLines: string[],
-  rightW: number,
+function pluralize(count: number, singular: string, pluralForm?: string): string {
+  const noun = count === 1 ? singular : (pluralForm ?? `${singular}s`);
+  return `${count} ${noun}`;
+}
+
+function buildShortcutsSummaryBullet(): string {
+  const theme = getPizzaTheme();
+  const dot = " " + theme.divider + "·" + R + " ";
+  return (
+    theme.section + "•" + R + " " +
+    theme.key + "shortcuts + prefixes:" + R + " " +
+    theme.desc + pluralize(SHORTCUTS.length, "shortcut") + R +
+    dot +
+    theme.desc + pluralize(COMMANDS.length, "command prefix", "command prefixes") + R
+  );
+}
+
+function buildResourcesSummaryBullet(resources: ResourceList): string {
+  const theme = getPizzaTheme();
+  const dot = " " + theme.divider + "·" + R + " ";
+  const parts = [
+    pluralize(resources.skills.length, "skill"),
+    pluralize(resources.prompts.length, "prompt"),
+    pluralize(resources.extensions.length, "extension"),
+    pluralize(resources.themes.length, "theme"),
+  ];
+  return (
+    theme.section + "•" + R + " " +
+    theme.key + "resources:" + R + " " +
+    parts.map((part) => theme.desc + part + R).join(dot)
+  );
+}
+
+function appendBulletToLastPanel(
+  panels: BannerPanel[],
+  bullet: string,
+  bulletCountByIndex: Map<number, number>,
+): void {
+  const idx = panels.length - 1;
+  if (idx < 0) return;
+
+  const panel = panels[idx];
+  const count = bulletCountByIndex.get(idx) ?? 0;
+  const lines = [
+    ...panel.lines,
+    ...(count === 0 ? [""] : []),
+    bullet,
+  ];
+  panels[idx] = {
+    ...panel,
+    lines,
+    width: maxLineWidth(lines),
+  };
+  bulletCountByIndex.set(idx, count + 1);
+}
+
+function buildPanels(
+  logoLines: string[],
+  innerW: number,
+  resources: ResourceList,
+  resourcesOpen: boolean,
+  shortcutsOpen: boolean,
+): BannerPanel[] {
+  const panels: BannerPanel[] = [
+    { key: "logo", lines: logoLines, width: maxLineWidth(logoLines) },
+  ];
+  const bulletCountByIndex = new Map<number, number>();
+
+  if (shortcutsOpen) {
+    const shortcutLines = buildShortcutsPanel();
+    panels.push({
+      key: "shortcuts",
+      lines: shortcutLines,
+      width: maxLineWidth(shortcutLines),
+    });
+  } else {
+    appendBulletToLastPanel(panels, buildShortcutsSummaryBullet(), bulletCountByIndex);
+  }
+
+  if (resourcesOpen) {
+    const resourceLines = buildResourcesLines(resources, innerW);
+    panels.push({
+      key: "resources",
+      lines: resourceLines,
+      width: maxLineWidth(resourceLines),
+    });
+  } else {
+    appendBulletToLastPanel(panels, buildResourcesSummaryBullet(resources), bulletCountByIndex);
+  }
+
+  return panels;
+}
+
+function renderPanelRow(panels: PlacedPanel[], totalW: number): string[] {
+  const theme = getPizzaTheme();
+  const separator = " " + theme.border + "│" + R + " ";
+  const maxRows = Math.max(...panels.map((panel) => panel.lines.length));
+
+  const rows: string[] = [];
+  for (let i = 0; i < maxRows; i++) {
+    const content = panels
+      .map((panel) => fitExact(panel.lines[i] ?? "", panel.clampedWidth))
+      .join(separator);
+    rows.push(fullWidthRow(content, totalW));
+  }
+  return rows;
+}
+
+function buildGroupSeparatorRow(totalW: number): string {
+  const theme = getPizzaTheme();
+  return theme.border + "├" + "─".repeat(Math.max(0, totalW - 2)) + "┤" + R;
+}
+
+function buildBanner(
   viewWidth: number,
   meta: SessionMeta,
   resources: ResourceList,
-  expanded: boolean,
+  resourcesOpen: boolean,
+  shortcutsOpen: boolean,
 ): string[] {
-  const theme = getPizzaTheme();
-  const contentW = Math.max(leftW, rightW);
-  const totalW = Math.max(contentW + 4, viewWidth);
-
-  const rows: string[] = [buildTopBorder(totalW)];
-
-  // Top padding
-  rows.push(fullWidthRow("", totalW));
-
-  for (const l of leftLines) {
-    rows.push(fullWidthRow(l, totalW));
-  }
-
-  rows.push(theme.border + "├" + "─".repeat(totalW - 2) + "┤" + R);
-
-  for (const r of rightLines) {
-    rows.push(fullWidthRow(r, totalW));
-  }
-
-  // Resources section (full width)
-  rows.push(fullWidthRow("", totalW));
+  const totalW = Math.max(4, viewWidth);
   const innerW = Math.max(0, totalW - 4);
-  for (const line of buildResourcesLines(resources, expanded, innerW)) {
-    rows.push(fullWidthRow(" " + line, totalW));
+
+  const logoLines = buildLeftColumn();
+  const panels = buildPanels(logoLines, innerW, resources, resourcesOpen, shortcutsOpen);
+  const panelRows = groupPanelsIntoRows(panels, innerW);
+  const rows: string[] = [buildTopBorder(totalW), fullWidthRow("", totalW)];
+
+  for (let i = 0; i < panelRows.length; i++) {
+    rows.push(...renderPanelRow(panelRows[i], totalW));
+    if (i < panelRows.length - 1) {
+      rows.push(buildGroupSeparatorRow(totalW));
+    }
   }
 
-  // Padding before session meta
   rows.push(fullWidthRow("", totalW));
-
-  // Session metadata
   rows.push(fullWidthRow(" " + formatSessionMeta(meta), totalW));
-
   rows.push(buildBotBorder(totalW));
   return rows;
 }
@@ -603,14 +653,21 @@ function assembleStacked(
 class PizzaHeader {
   private meta: SessionMeta;
   private resources: ResourceList;
-  private expanded: boolean;
-  private cache?: { width: number; expanded: boolean; lines: string[] };
+  private resourcesOpen: boolean;
+  private shortcutsOpen: boolean;
+  private cache?: {
+    width: number;
+    resourcesOpen: boolean;
+    shortcutsOpen: boolean;
+    lines: string[];
+  };
   private requestRender?: () => void;
 
-  constructor(meta: SessionMeta, resources: ResourceList, expanded: boolean) {
+  constructor(meta: SessionMeta, resources: ResourceList, resourcesOpen: boolean, shortcutsOpen: boolean) {
     this.meta = meta;
     this.resources = resources;
-    this.expanded = expanded;
+    this.resourcesOpen = resourcesOpen;
+    this.shortcutsOpen = shortcutsOpen;
   }
 
   attach(tui: { requestRender?: () => void } | undefined): void {
@@ -618,11 +675,17 @@ class PizzaHeader {
   }
 
   render(width: number): string[] {
-    if (!this.cache || this.cache.width !== width || this.cache.expanded !== this.expanded) {
+    if (
+      !this.cache ||
+      this.cache.width !== width ||
+      this.cache.resourcesOpen !== this.resourcesOpen ||
+      this.cache.shortcutsOpen !== this.shortcutsOpen
+    ) {
       this.cache = {
         width,
-        expanded: this.expanded,
-        lines: buildBanner(width, this.meta, this.resources, this.expanded),
+        resourcesOpen: this.resourcesOpen,
+        shortcutsOpen: this.shortcutsOpen,
+        lines: buildBanner(width, this.meta, this.resources, this.resourcesOpen, this.shortcutsOpen),
       };
     }
     return this.cache.lines;
@@ -632,10 +695,11 @@ class PizzaHeader {
     this.cache = undefined;
   }
 
-  update(meta: SessionMeta, resources: ResourceList, expanded: boolean): void {
+  update(meta: SessionMeta, resources: ResourceList, resourcesOpen: boolean, shortcutsOpen: boolean): void {
     this.meta = meta;
     this.resources = resources;
-    this.expanded = expanded;
+    this.resourcesOpen = resourcesOpen;
+    this.shortcutsOpen = shortcutsOpen;
     this.invalidate();
     this.requestRender?.();
   }
@@ -654,11 +718,11 @@ function setOrUpdateHeader(ctx: any, reason?: string): void {
 
   if (existing) {
     existing.reason = effectiveReason;
-    existing.header.update(meta, resources, resourcesExpanded);
+    existing.header.update(meta, resources, resourcesExpanded, shortcutsExpanded);
     return;
   }
 
-  const header = new PizzaHeader(meta, resources, resourcesExpanded);
+  const header = new PizzaHeader(meta, resources, resourcesExpanded, shortcutsExpanded);
   HEADER_STATES.set(sessionManager, { header, reason: effectiveReason });
   ctx.ui.setHeader((tui: { requestRender?: () => void }, _theme: unknown) => {
     header.attach(tui);
@@ -694,11 +758,25 @@ export default function pizzaUiExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("pizza", {
     description:
-      "Show Pizza status, or run `resources` to expand/collapse the resources section",
+      "Show Pizza status, or run `resources`/`shortcuts` to expand/collapse banner sections",
     handler: async (args, ctx) => {
       const tokens = (args ?? "").trim().split(/\s+/).filter(Boolean);
-      if (tokens[0] === "resources") {
+      const cmd = tokens[0]?.toLowerCase();
+
+      if (cmd === "resources") {
         runResourcesCommand(tokens.slice(1), ctx);
+        return;
+      }
+      if (cmd === "shortcuts") {
+        runShortcutsCommand(tokens.slice(1), ctx);
+        return;
+      }
+      if (cmd === "help" || cmd === "-h" || cmd === "--help") {
+        emit(ctx, pizzaCommandHelpLines(), "info");
+        return;
+      }
+      if (cmd && cmd.length > 0) {
+        emit(ctx, [`Unknown /pizza subcommand: ${cmd}`, ...pizzaCommandHelpLines()], "warning");
         return;
       }
 
@@ -710,6 +788,7 @@ export default function pizzaUiExtension(pi: ExtensionAPI): void {
         `Model: ${model}`,
         `CWD: ${ctx.cwd}`,
         `Theme: ${getActivePizzaThemeName()}`,
+        `Banner: shortcuts ${shortcutsExpanded ? "open" : "collapsed"}, resources ${resourcesExpanded ? "open" : "collapsed"}`,
       ];
       if (usage?.percent != null) {
         lines.push(`Context: ${usage.percent}%`);
@@ -725,11 +804,37 @@ function emit(ctx: any, lines: string[], level: "info" | "warning"): void {
   else console.log(msg);
 }
 
+function pizzaCommandHelpLines(): string[] {
+  return [
+    "Usage:",
+    "  /pizza",
+    "  /pizza resources [toggle|expand|collapse]",
+    "  /pizza shortcuts [toggle|expand|collapse]",
+  ];
+}
+
+function parseToggleAction(token?: string): "toggle" | "open" | "close" | "invalid" {
+  if (!token || token.length === 0) return "toggle";
+  const arg = token.toLowerCase();
+  if (arg === "toggle") return "toggle";
+  if (arg === "expand" || arg === "open") return "open";
+  if (arg === "collapse" || arg === "close") return "close";
+  return "invalid";
+}
+
 function runResourcesCommand(tokens: string[], ctx: any): void {
-  const arg = tokens[0]?.toLowerCase();
+  const action = parseToggleAction(tokens[0]);
+  if (action === "invalid") {
+    emit(ctx, [
+      `Unknown resources action: ${tokens[0]}`,
+      "Try: /pizza resources [toggle|expand|collapse]",
+    ], "warning");
+    return;
+  }
+
   const prev = resourcesExpanded;
-  if (arg === "expand" || arg === "open") resourcesExpanded = true;
-  else if (arg === "collapse" || arg === "close") resourcesExpanded = false;
+  if (action === "open") resourcesExpanded = true;
+  else if (action === "close") resourcesExpanded = false;
   else resourcesExpanded = !resourcesExpanded;
 
   setOrUpdateHeader(ctx);
@@ -737,6 +842,31 @@ function runResourcesCommand(tokens: string[], ctx: any): void {
     emit(
       ctx,
       [`Resources ${resourcesExpanded ? "expanded" : "collapsed"}`],
+      "info",
+    );
+  }
+}
+
+function runShortcutsCommand(tokens: string[], ctx: any): void {
+  const action = parseToggleAction(tokens[0]);
+  if (action === "invalid") {
+    emit(ctx, [
+      `Unknown shortcuts action: ${tokens[0]}`,
+      "Try: /pizza shortcuts [toggle|expand|collapse]",
+    ], "warning");
+    return;
+  }
+
+  const prev = shortcutsExpanded;
+  if (action === "open") shortcutsExpanded = true;
+  else if (action === "close") shortcutsExpanded = false;
+  else shortcutsExpanded = !shortcutsExpanded;
+
+  setOrUpdateHeader(ctx);
+  if (prev !== shortcutsExpanded) {
+    emit(
+      ctx,
+      [`Shortcuts + Prefixes ${shortcutsExpanded ? "expanded" : "collapsed"}`],
       "info",
     );
   }

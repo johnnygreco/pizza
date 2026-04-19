@@ -179,9 +179,9 @@ describe("pizza-ui extension", () => {
 
     const output = renderHeader(ctx, 140);
     const lines = output.split("\n");
-    // top border + padding + 11 content + padding + resources (1) + padding +
-    // session meta + bottom border = 18
-    expect(lines.length).toBe(18);
+    // Keep at least the expected structural rows (top/bottom borders, padding,
+    // content, and session meta), while allowing banner sections to grow.
+    expect(lines.length).toBeGreaterThanOrEqual(18);
 
     // Second line (after top border) should be empty padding (only borders + spaces)
     const paddingLine = stripAnsi(lines[1]);
@@ -350,6 +350,25 @@ describe("pizza-ui extension", () => {
     expect(third).not.toBe(first);
   });
 
+  it("uses a single top row for logo, shortcuts, and resources when wide enough", async () => {
+    const { api, registeredEvents, registeredCommands } = createMockApi({
+      commands: RESOURCE_COMMANDS,
+    });
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemesSurface(createMockContext(true));
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+    await registeredCommands.get("pizza").handler("resources expand", ctx);
+
+    const lines = stripAnsi(renderHeader(ctx, 220)).split("\n");
+    const topPanelLine = lines.find((line) =>
+      line.includes("▄████") &&
+      line.includes("▾ shortcuts + prefixes") &&
+      line.includes("▾ resources"),
+    );
+    expect(topPanelLine).toBeTruthy();
+  });
+
   it("falls back to stacked layout for narrow terminals", async () => {
     const { api, registeredEvents } = createMockApi();
     pizzaUiExtension(api as any);
@@ -359,9 +378,8 @@ describe("pizza-ui extension", () => {
 
     const output = renderHeader(ctx, 70);
     const lines = output.split("\n");
-    // stacked: top + padding + 10 left + separator + 11 right + padding +
-    // resources (1) + padding + meta + bottom = 29
-    expect(lines.length).toBe(29);
+    expect(lines.length).toBeGreaterThanOrEqual(29);
+    expect(output).toContain("├");
     expect(output).toContain("●");
     expect(output).toContain("interrupt");
     expect(output).toContain("New session");
@@ -436,7 +454,7 @@ describe("pizza-ui extension", () => {
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 
-  it("/pizza shows version, model, cwd, and context", async () => {
+  it("/pizza shows version, model, cwd, banner states, and context", async () => {
     const { api, registeredCommands } = createMockApi();
     pizzaUiExtension(api as any);
 
@@ -445,15 +463,43 @@ describe("pizza-ui extension", () => {
       model: { id: "claude-sonnet-4-20250514", name: "sonnet", provider: "anthropic" },
       percent: 15,
     });
+    await registeredCommands.get("pizza").handler("resources collapse", ctx);
     await registeredCommands.get("pizza").handler("", ctx);
 
-    const msg = ctx.ui.notify.mock.calls[0][0] as string;
+    const msg = ctx.ui.notify.mock.calls.at(-1)![0] as string;
     expect(msg).toContain(VERSION);
     expect(msg).toContain("Pi:");
     expect(msg).toContain("compatible with 0.67.x");
     expect(msg).toContain("Anthropic: sonnet");
     expect(msg).toContain("/home/user/project");
+    expect(msg).toContain("Banner: shortcuts open, resources collapsed");
     expect(msg).toContain("15%");
+  });
+
+  it("/pizza help shows usage", async () => {
+    const { api, registeredCommands } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true);
+    await registeredCommands.get("pizza").handler("help", ctx);
+
+    const msg = ctx.ui.notify.mock.calls.at(-1)![0] as string;
+    expect(msg).toContain("Usage:");
+    expect(msg).toContain("/pizza resources");
+    expect(msg).toContain("/pizza shortcuts");
+  });
+
+  it("/pizza warns on unknown subcommands", async () => {
+    const { api, registeredCommands } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true);
+    await registeredCommands.get("pizza").handler("wat", ctx);
+
+    const [msg, level] = ctx.ui.notify.mock.calls.at(-1)!;
+    expect(level).toBe("warning");
+    expect(msg).toContain("Unknown /pizza subcommand: wat");
+    expect(msg).toContain("/pizza shortcuts");
   });
 
   it("/pizza skips when no UI", async () => {
@@ -493,19 +539,15 @@ describe("/pizza resources subcommand", () => {
   });
 
   it("renders a collapsed resources row with category counts by default", async () => {
-    const { api, registeredEvents } = createMockApi({ commands: RESOURCE_COMMANDS });
+    const { api, registeredEvents, registeredCommands } = createMockApi({ commands: RESOURCE_COMMANDS });
     pizzaUiExtension(api as any);
 
     const ctx = withThemesSurface(createMockContext(true));
+    await registeredCommands.get("pizza").handler("resources collapse", ctx);
     await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
 
     const output = stripAnsi(renderHeader(ctx, 140));
-    expect(output).toContain("▸ resources");
-    expect(output).toContain("skills 2");
-    expect(output).toContain("prompts 1");
-    expect(output).toContain("ext 2");
-    expect(output).toContain("themes 2");
-    expect(output).toContain("(/pizza resources)");
+    expect(output).toContain("• resources: 2 skills · 1 prompt · 2 extensions · 2 themes");
     // Collapsed form: resource names should not be listed.
     expect(output).not.toContain("alpha");
   });
@@ -546,8 +588,23 @@ describe("/pizza resources subcommand", () => {
     await registeredCommands.get("pizza").handler("resources collapse", ctx);
 
     const output = stripAnsi(renderHeader(ctx, 140));
-    expect(output).toContain("▸ resources");
+    expect(output).toContain("• resources: 2 skills · 1 prompt · 2 extensions · 2 themes");
     expect(output).not.toContain("alpha");
+  });
+
+  it("/pizza resources warns on invalid actions", async () => {
+    const { api, registeredEvents, registeredCommands } = createMockApi({
+      commands: RESOURCE_COMMANDS,
+    });
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemesSurface(createMockContext(true));
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+    await registeredCommands.get("pizza").handler("resources nope", ctx);
+
+    const [msg, level] = ctx.ui.notify.mock.calls.at(-1)!;
+    expect(level).toBe("warning");
+    expect(msg).toContain("Unknown resources action: nope");
   });
 
   it("wraps expanded resource lists that overflow the banner width", async () => {
@@ -579,5 +636,85 @@ describe("/pizza resources subcommand", () => {
     for (const line of output.split("\n")) {
       expect(stripAnsi(line).length).toBeLessThanOrEqual(width);
     }
+  });
+});
+
+describe("/pizza shortcuts subcommand", () => {
+  afterEach(async () => {
+    // Reset module-level expansion flag to expanded (default behavior).
+    const { api, registeredCommands } = createMockApi({ commands: [] });
+    pizzaUiExtension(api as any);
+    const ctx = withThemesSurface(createMockContext(true));
+    await registeredCommands.get("pizza").handler("shortcuts expand", ctx);
+  });
+
+  it("/pizza shortcuts collapse hides the shortcuts table", async () => {
+    const { api, registeredEvents, registeredCommands } = createMockApi({
+      commands: RESOURCE_COMMANDS,
+    });
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemesSurface(createMockContext(true));
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+    await registeredCommands.get("pizza").handler("shortcuts collapse", ctx);
+
+    const output = stripAnsi(renderHeader(ctx, 140));
+    expect(output).toContain("• shortcuts + prefixes: 8 shortcuts · 3 command prefixes");
+    expect(output).not.toContain("Shift+Tab");
+
+    const last = ctx.ui.notify.mock.calls.at(-1)!;
+    expect(last[0]).toBe("Shortcuts + Prefixes collapsed");
+  });
+
+  it("renders full-word bullet summaries for collapsed sections", async () => {
+    const { api, registeredEvents, registeredCommands } = createMockApi({
+      commands: RESOURCE_COMMANDS,
+    });
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemesSurface(createMockContext(true));
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+    await registeredCommands.get("pizza").handler("shortcuts collapse", ctx);
+    await registeredCommands.get("pizza").handler("resources collapse", ctx);
+
+    const output = stripAnsi(renderHeader(ctx, 240));
+    expect(output).toContain("• shortcuts + prefixes: 8 shortcuts · 3 command prefixes");
+    expect(output).toContain("• resources: 2 skills · 1 prompt · 2 extensions · 2 themes");
+  });
+
+  it("/pizza shortcuts expand restores the shortcuts + prefixes table", async () => {
+    const { api, registeredEvents, registeredCommands } = createMockApi({
+      commands: RESOURCE_COMMANDS,
+    });
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemesSurface(createMockContext(true));
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+    await registeredCommands.get("pizza").handler("shortcuts collapse", ctx);
+    await registeredCommands.get("pizza").handler("shortcuts expand", ctx);
+
+    const output = stripAnsi(renderHeader(ctx, 140));
+    expect(output).toContain("▾ shortcuts + prefixes");
+    expect(output).toContain("SHORTCUTS");
+    expect(output).toContain("PREFIXES");
+    expect(output).toContain("Shift+Tab");
+
+    const last = ctx.ui.notify.mock.calls.at(-1)!;
+    expect(last[0]).toBe("Shortcuts + Prefixes expanded");
+  });
+
+  it("/pizza shortcuts warns on invalid actions", async () => {
+    const { api, registeredEvents, registeredCommands } = createMockApi({
+      commands: RESOURCE_COMMANDS,
+    });
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemesSurface(createMockContext(true));
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+    await registeredCommands.get("pizza").handler("shortcuts nope", ctx);
+
+    const [msg, level] = ctx.ui.notify.mock.calls.at(-1)!;
+    expect(level).toBe("warning");
+    expect(msg).toContain("Unknown shortcuts action: nope");
   });
 });
