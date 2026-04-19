@@ -1,6 +1,6 @@
 # 🍕 Pizza
 
-**Pi with extra toppings** — my opinionated [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) setup, packaged as a set of extensions.
+**Pi with extra toppings** — an opinionated [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) setup, packaged as a set of extensions.
 
 ## 📦 Install
 
@@ -24,6 +24,8 @@ Set `PIZZA_HOME` to change the install directory.
 
 ## 🧩 What's in the box
 
+### Commands
+
 **`/loop`** — Run the agent in a loop until a condition is met.
 
 ```
@@ -45,7 +47,9 @@ pi --control-session mybot --send-session-message "status update?"
 
 **`/agents`**, **`/run`**, **`/chain`**, **`/parallel`** — Subagent delegation with async support, chains, and parallel execution.
 
-**`/pizza`** — Version, model, and context at a glance.
+**`/pizza`** — Pizza version, Pi compatibility, model, cwd, active theme, and context at a glance.
+  - `/pizza theme [name]` — switch themes; Pizza stays synced with Pi's active theme.
+  - `/pizza resources` — expand/collapse the resources section of the banner.
 
 ### Credits
 
@@ -54,9 +58,13 @@ pi --control-session mybot --send-session-message "status update?"
 ## 🛠️ Development
 
 ```bash
-npm install
-npm test
+npm install          # dev deps (includes pi-coding-agent for types)
+make setup           # clone vendored subagents/ for local iteration (optional)
+
 npm run typecheck
+npm test             # vitest
+make test-install    # install.sh smoke tests
+make test-all        # vitest + install smoke tests
 ```
 
 Test a single extension:
@@ -71,7 +79,7 @@ Test the full package locally:
 pi install .
 ```
 
-See the [Pi extension docs](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#extensions) for writing your own extensions.
+See [AGENTS.md](AGENTS.md) for architecture notes and the [Pi extension docs](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent#extensions) for writing your own extensions.
 
 ### Release
 
