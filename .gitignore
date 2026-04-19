@@ -3,3 +3,4 @@ subagents/
 coverage/
 *.tsbuildinfo
 .DS_Store
+.pi/
