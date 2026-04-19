@@ -48,8 +48,11 @@ pi --control-session mybot --send-session-message "status update?"
 **`/agents`**, **`/run`**, **`/chain`**, **`/parallel`** — Subagent delegation with async support, chains, and parallel execution.
 
 **`/pizza`** — Pizza version, Pi compatibility, model, cwd, active theme, and context at a glance.
-  - `/pizza theme [name]` — switch themes; Pizza stays synced with Pi's active theme.
   - `/pizza resources` — expand/collapse the resources section of the banner.
+
+**`/theme`** — Pick a theme interactively, or `/theme <name>` to switch directly. Pizza's palette follows Pi's active theme.
+  - `Ctrl+X` — cycle theme forward
+  - `Ctrl+Q` — cycle theme backward
 
 ### Credits
 

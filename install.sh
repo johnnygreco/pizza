@@ -199,6 +199,7 @@ main() {
     echo "  Location: $INSTALL_DIR"
     echo "  Extensions:"
     echo "    - pizza-ui"
+    echo "    - pizza-theme"
     echo "    - loop"
     echo "    - context"
     echo "    - todos"
