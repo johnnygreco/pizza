@@ -1037,7 +1037,6 @@ export default function (pi: ExtensionAPI) {
 		registerSessionTool(pi, state);
 		registerListSessionsTool(pi);
 	}
-	registerControlSessionsCommand(pi);
 
 	const refreshServer = async (ctx: ExtensionContext) => {
 		const enabled = pi.getFlag(CONTROL_FLAG) === true;
@@ -1737,43 +1736,3 @@ async function maybeHandleStartupControlSend(pi: ExtensionAPI, ctx: ExtensionCon
 	}
 }
 
-function registerControlSessionsCommand(pi: ExtensionAPI): void {
-	pi.registerCommand("control-sessions", {
-		description: "List controllable sessions (from session-control sockets)",
-		handler: async (_args, ctx) => {
-			if (pi.getFlag(CONTROL_FLAG) !== true) {
-				const msg = "Session control not enabled (use --session-control)";
-				if (ctx.hasUI) {
-					ctx.ui.notify(msg, "warning");
-				} else {
-					console.log(msg);
-				}
-				return;
-			}
-
-			const sessions = await getLiveSessions();
-			const currentSessionId = ctx.sessionManager.getSessionId();
-			const lines = sessions.map((session) => {
-				const name = session.name ? ` (${session.name})` : "";
-				const current = session.sessionId === currentSessionId ? " (current)" : "";
-				return `- ${session.sessionId}${name}${current}`;
-			});
-			const content = sessions.length === 0
-				? "No live sessions found."
-				: `Controllable sessions:\n${lines.join("\n")}`;
-
-			if (ctx.hasUI) {
-				pi.sendMessage(
-					{
-						customType: "control-sessions",
-						content,
-						display: true,
-					},
-					{ triggerTurn: false },
-				);
-			} else {
-				console.log(content);
-			}
-		},
-	});
-}
