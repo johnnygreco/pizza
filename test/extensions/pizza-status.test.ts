@@ -195,7 +195,7 @@ describe("pizza-status extension", () => {
         ctx,
         {
           branch: "main",
-          extensionStatuses: new Map([["pizza.status", statusText]]),
+          extensionStatuses: new Map([["pizza.hud.10.status", statusText]]),
         },
         140,
       ),
@@ -208,9 +208,9 @@ describe("pizza-status extension", () => {
     expect(footerLines[0]).toContain("↓2.2k");
     expect(footerLines[0]).toContain("R300");
     expect(footerLines[0]).toContain("$0.0250");
-    expect(footerLines[1]).toBe("");
     expect(footer).not.toContain("qwen/qwen3-coder:free");
-    expect(footerLines[1]).not.toContain("50.0%/262k (auto)");
+    expect(footerLines[1]).toBe("");
+    expect(footerLines[2]).toContain("50.0%/262k (auto)");
     expect(footer).toContain("🍕");
     expect(footer).toContain("50.0%/262k (auto)");
     expect(footer).toContain("OpenRouter: Qwen3 Coder");
@@ -246,7 +246,7 @@ describe("pizza-status extension", () => {
         ctx,
         {
           branch: null,
-          extensionStatuses: new Map([["pizza.status", statusText]]),
+          extensionStatuses: new Map([["pizza.hud.10.status", statusText]]),
         },
         140,
       ),
@@ -261,6 +261,36 @@ describe("pizza-status extension", () => {
     expect(footerLines[1]).toBe("");
     expect(footer).not.toContain("anthropic/claude-opus-4.6");
     expect(footer).toContain("OpenRouter: Claude Opus 4.6");
+  });
+
+  it("renders dedicated HUD lines separately from auxiliary status text", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaStatusExtension(api as any);
+
+    const ctx = createMockContext(true, { percent: 24 });
+    await registeredEvents.get("session_start")![0]({}, ctx);
+
+    const statusText = ctx.ui.setStatus.mock.calls[0][1] as string;
+    const footer = stripAnsi(
+      renderFooter(
+        ctx,
+        {
+          extensionStatuses: new Map([
+            ["pizza.hud.10.status", statusText],
+            ["pizza.hud.20.session", '• "banner cleanup" · 2 msgs · 1 turn · 14m running'],
+            ["pizza.theme", "🎨 dracula"],
+          ]),
+        },
+        140,
+      ),
+    );
+    const footerLines = footer.split("\n");
+
+    expect(footerLines).toHaveLength(3);
+    expect(footerLines[1]).toBe("");
+    expect(footerLines[2]).toContain("🍕");
+    expect(footerLines[2]).toContain('"banner cleanup"');
+    expect(footerLines[2]).not.toContain("dracula");
   });
 
   it("skips status updates when no UI is available", async () => {

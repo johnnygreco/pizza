@@ -9,7 +9,7 @@ import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { formatModelLabel } from "./shared/model-label.ts";
 import { ANSI_BOLD, ANSI_RESET, getPizzaTheme, onPizzaThemeChange } from "./shared/pizza-palette.ts";
 
-const STATUS_KEY = "pizza.status";
+const STATUS_KEY = "pizza.hud.10.status";
 const METER_WIDTH = 20;
 const AUTO_CONTEXT_SUFFIX = " (auto)";
 
@@ -172,6 +172,44 @@ function buildStatsText(ctx: ExtensionContext): string {
 const GREY = "\x1b[38;5;244m";
 const grey = (text: string): string => `${GREY}${text}${ANSI_RESET}`;
 
+function normalizeInlineStatus(text: string): string {
+	return sanitizeStatusText(text).replace(/^\s*•\s*/u, "").replace(/^\s*🎨\s*/u, "").trim();
+}
+
+function buildInlineMetaText(statuses: ReadonlyMap<string, string>): string {
+	const parts: string[] = [];
+
+	const sessionText = statuses.get("pizza.hud.20.session");
+	if (sessionText) parts.push(normalizeInlineStatus(sessionText));
+
+	return parts.join("");
+}
+
+function buildSplitStatusLine(left: string, right: string, width: number, theme: FooterTheme): string {
+	const leftWidth = visibleWidth(left);
+	if (!right) {
+		return truncateToWidth(left, width, theme.fg("dim", "..."));
+	}
+
+	if (leftWidth >= width) {
+		return truncateToWidth(left, width, theme.fg("dim", "..."));
+	}
+
+	const minGap = 2;
+	const rightWidth = visibleWidth(right);
+	if (leftWidth + minGap + rightWidth <= width) {
+		return left + " ".repeat(width - leftWidth - rightWidth) + right;
+	}
+
+	const availableForRight = width - leftWidth - minGap;
+	if (availableForRight >= 12) {
+		const truncatedRight = truncateToWidth(right, availableForRight, theme.fg("dim", "..."));
+		return left + " ".repeat(Math.max(minGap, width - leftWidth - visibleWidth(truncatedRight))) + truncatedRight;
+	}
+
+	return truncateToWidth(left, width, theme.fg("dim", "..."));
+}
+
 function buildPwdLine(ctx: ExtensionContext, width: number, _theme: FooterTheme, footerData: ReadonlyFooterDataProvider): string {
 	let pwd = ctx.cwd;
 	const home = process.env.HOME || process.env.USERPROFILE;
@@ -222,17 +260,30 @@ function buildFooterLines(
 	footerData: ReadonlyFooterDataProvider,
 ): string[] {
 	const lines = [buildPwdLine(ctx, width, theme, footerData)];
-	const lowerLines: string[] = [];
-	const extensionStatuses = footerData.getExtensionStatuses();
-	if (extensionStatuses.size > 0) {
-		const statusLine = Array.from(extensionStatuses.entries())
-			.sort(([a], [b]) => a.localeCompare(b))
-			.map(([, text]) => sanitizeStatusText(text))
-			.join(" ");
-		lowerLines.push(truncateToWidth(statusLine, width, theme.fg("dim", "...")));
+	const extensionStatuses = Array.from(footerData.getExtensionStatuses().entries())
+		.sort(([a], [b]) => a.localeCompare(b))
+		.map(([key, text]) => [key, sanitizeStatusText(text)] as const);
+
+	const statusMap = new Map(extensionStatuses);
+	const primaryHud = statusMap.get(STATUS_KEY);
+	const inlineMeta = buildInlineMetaText(statusMap);
+	const auxEntries = extensionStatuses.filter(
+		([key]) => key !== STATUS_KEY && key !== "pizza.hud.20.session" && key !== "pizza.theme",
+	);
+
+	if (primaryHud) {
+		lines.push("");
+		lines.push(buildSplitStatusLine(primaryHud, inlineMeta, width, theme));
 	}
-	if (lowerLines.length > 0) {
-		lines.push("", ...lowerLines);
+
+	if (auxEntries.length > 0) {
+		lines.push(
+			truncateToWidth(
+				auxEntries.map(([, text]) => text).join(" "),
+				width,
+				theme.fg("dim", "..."),
+			),
+		);
 	}
 	return lines;
 }
