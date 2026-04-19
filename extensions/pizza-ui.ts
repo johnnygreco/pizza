@@ -92,36 +92,43 @@ function fitExact(s: string, width: number): string {
 // ── Session metadata ────────────────────────────────────────
 
 interface SessionMeta {
-  reason: string;
+  reason: "new" | "fork" | "reload" | "resume";
   name?: string;
-  model: string;
   messageCount: number;
-  lastActive?: Date;
+  turnCount: number;
+  startedAt?: Date;
   topic?: string;
 }
 
 type HeaderState = {
   header: PizzaHeader;
-  reason: string;
+  reason: SessionMeta["reason"];
 };
 
+const SESSION_STATUS_KEY = "pizza.hud.20.session";
+
 const HEADER_STATES = new WeakMap<object, HeaderState>();
+const SESSION_STARTED_AT = new WeakMap<object, Date>();
 
 // The cycler flips Pi's theme mid-turn; turn_end won't fire until the next
-// LLM response, so rebuild the cached banner as soon as the palette changes.
-// Register once at module load; session_start points the listener at the
-// latest ctx.
+// LLM response, so invalidate the cached banner immediately. We avoid forcing
+// a render here because changing content above the transcript causes a full
+// screen redraw in Pi's TUI.
 let latestCtxForHeader: any | undefined;
 onPizzaThemeChange(() => {
-  if (latestCtxForHeader) setOrUpdateHeader(latestCtxForHeader);
+  if (!latestCtxForHeader) return;
+
+  const sessionManager = latestCtxForHeader.sessionManager as object | undefined;
+  const state = sessionManager ? HEADER_STATES.get(sessionManager) : undefined;
+  state?.header.invalidate();
+  updateSessionStatus(latestCtxForHeader);
 });
 
 // ── Resources (skills / prompts / extensions / themes) ──────
 // Collected once per header rebuild and passed into buildBanner so the pinned
-// banner can summarize what Pi loaded at boot — and, when expanded, list the
-// names grouped by source. Section expansion state is module-level (resources
-// + shortcuts) because there's one visual banner across the process;
-// per-session toggling wouldn't map to anything users can see differently.
+// banner can list the names grouped by source. The banner always shows the
+// expanded sections; `/pizza resources` and `/pizza shortcuts` print the same
+// formatted section content on demand without mutating header state.
 
 interface ResourceList {
   skills: string[];
@@ -129,9 +136,6 @@ interface ResourceList {
   extensions: string[]; // commands with source === "extension"
   themes: string[];
 }
-
-let resourcesExpanded = false;
-let shortcutsExpanded = true;
 
 // `pi` (ExtensionAPI) is captured at registration so we can read getCommands()
 // during event handling. Only ExtensionAPI exposes getCommands — ExtensionContext
@@ -156,16 +160,33 @@ function collectResources(ctx: any): ResourceList {
   };
 }
 
-function relativeTime(date: Date): string {
-  const diff = Date.now() - date.getTime();
-  const secs = Math.floor(diff / 1000);
-  if (secs < 60) return "just now";
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
+function parseTimestamp(value: unknown): Date | undefined {
+  if (!value) return undefined;
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function minDate(a: Date | undefined, b: Date | undefined): Date | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return a.getTime() <= b.getTime() ? a : b;
+}
+
+function formatElapsed(date: Date): string {
+  const diffMs = Math.max(0, Date.now() - date.getTime());
+  const totalMinutes = Math.floor(diffMs / 60000);
+  if (totalMinutes < 1) return "<1m";
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours < 24) {
+    return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+  }
+
   const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  const remHours = hours % 24;
+  return remHours === 0 ? `${days}d` : `${days}d ${remHours}h`;
 }
 
 function extractText(content: unknown): string {
@@ -185,19 +206,30 @@ function truncate(s: string, maxLen: number): string {
   return line.slice(0, maxLen - 1) + "…";
 }
 
-function extractSessionMeta(event: any, ctx: any): SessionMeta {
+function normalizeSessionReason(
+  reason: string | undefined,
+  messageCount: number,
+): SessionMeta["reason"] {
+  if (reason === "new" || reason === "fork" || reason === "reload" || reason === "resume") {
+    return reason;
+  }
+  return messageCount === 0 ? "new" : "resume";
+}
+
+function extractSessionMeta(reason: string | undefined, ctx: any): SessionMeta {
   const entries: any[] = ctx.sessionManager?.getEntries?.() ?? [];
-  const model = formatModelLabel(ctx.model) ?? "default";
   const name = ctx.sessionManager?.getSessionName?.();
+  const sessionManager = ctx.sessionManager as object | undefined;
+  const trackedStart = sessionManager ? SESSION_STARTED_AT.get(sessionManager) : undefined;
 
   const msgEntries = entries.filter((e: any) => e.type === "message");
   const messageCount = msgEntries.length;
+  const turnCount = msgEntries.filter((e: any) => e.message?.role === "user").length;
 
-  let lastActive: Date | undefined;
-  if (entries.length > 0) {
-    const ts = entries[entries.length - 1].timestamp;
-    if (ts) lastActive = new Date(ts);
-  }
+  const firstEntryWithTimestamp = entries
+    .map((entry: any) => parseTimestamp(entry?.timestamp))
+    .find((date): date is Date => Boolean(date));
+  const startedAt = minDate(trackedStart, firstEntryWithTimestamp);
 
   let topic: string | undefined;
   const firstUser = msgEntries.find((e: any) => e.message?.role === "user");
@@ -206,7 +238,14 @@ function extractSessionMeta(event: any, ctx: any): SessionMeta {
     if (raw) topic = truncate(raw, 40);
   }
 
-  return { reason: event?.reason ?? "startup", name, model, messageCount, lastActive, topic };
+  return {
+    reason: normalizeSessionReason(reason, messageCount),
+    name,
+    messageCount,
+    turnCount,
+    startedAt,
+    topic,
+  };
 }
 
 function formatSessionMeta(meta: SessionMeta): string {
@@ -214,49 +253,66 @@ function formatSessionMeta(meta: SessionMeta): string {
   const dot = " " + theme.divider + "·" + R + " ";
   const parts: string[] = [];
 
-  const isNew = meta.reason === "new" || (meta.reason === "startup" && meta.messageCount === 0);
-  if (isNew) {
-    parts.push(theme.key + "New session" + R);
-  } else if (meta.reason === "fork") {
+  if (meta.reason === "fork") {
     parts.push(theme.key + "Forked" + R);
   } else if (meta.reason === "reload") {
     parts.push(theme.key + "Reloaded" + R);
-  } else {
+  } else if (meta.reason === "resume") {
     parts.push(theme.key + "Resumed" + R);
   }
 
   if (meta.name) {
     parts.push(theme.tagText + `"${meta.name}"` + R);
-  } else if (meta.topic && !isNew) {
+  } else if (meta.topic && meta.reason !== "new") {
     parts.push(theme.tagText + `"${meta.topic}"` + R);
   }
 
-  if (meta.messageCount > 0) {
-    parts.push(theme.desc + `${meta.messageCount} msgs` + R);
-  }
-
-  if (meta.lastActive && !isNew) {
-    parts.push(theme.desc + relativeTime(meta.lastActive) + R);
-  }
-
-  parts.push(theme.tagPi + meta.model + R);
-
   return parts.join(dot);
+}
+
+function formatLiveSessionStatus(meta: SessionMeta): string {
+  const theme = getPizzaTheme();
+  const dot = " " + theme.divider + "·" + R + " ";
+  const parts: string[] = [];
+
+  if (meta.reason === "fork") {
+    parts.push(theme.key + "Forked" + R);
+  } else if (meta.reason === "reload") {
+    parts.push(theme.key + "Reloaded" + R);
+  } else if (meta.reason === "resume") {
+    parts.push(theme.key + "Resumed" + R);
+  }
+
+  if (meta.name) {
+    parts.push(theme.tagText + `"${meta.name}"` + R);
+  } else if (meta.topic) {
+    parts.push(theme.tagText + `"${meta.topic}"` + R);
+  }
+
+  parts.push(theme.desc + pluralize(meta.messageCount, "msg") + R);
+  parts.push(theme.desc + pluralize(meta.turnCount, "turn") + R);
+  if (meta.startedAt) {
+    parts.push(theme.desc + `${formatElapsed(meta.startedAt)} running` + R);
+  }
+
+  if (parts.length === 0) return "";
+
+  return theme.section + "•" + R + " " + parts.join(dot);
 }
 
 // ── Static data ─────────────────────────────────────────────
 
 const PIZZA_ART = [
-  "        ▄████████████▄     ", //  0  crust top
-  "       ██░░░●░░░░░●░░██    ", //  1
-  "      ██░●░░░░░▮░░░░●░██   ", //  2  ─┐
-  "     ██░░░▬░░░●░░░░░░░●██  ", //  3   │
-  "     ██░●░░░░▮░░░●░░▬░░██  ", //  4   │ text
-  "      ██░░░●░░░░░▬░░░●██   ", //  5  ─┘
-  "       ██░░▮░░░●░░░░░██    ", //  6
-  "        ▀████████████▀     ", //  7  crust bottom + tagline
-  "            ╷┃╷  ╽ ╷       ", //  8  drips
-  "         ╵  ┃╵  │          ", //  9  drips
+  "   ▄████████████▄     ", //  0  crust top
+  "  ██░░░●░░░░░●░░██    ", //  1
+  " ██░●░░░░░▮░░░░●░██   ", //  2  ─┐
+  "██░░░▬░░░●░░░░░░░●██  ", //  3   │
+  "██░●░░░░▮░░░●░░▬░░██  ", //  4   │ text
+  " ██░░░●░░░░░▬░░░●██   ", //  5  ─┘
+  "  ██░░▮░░░●░░░░░██    ", //  6
+  "   ▀████████████▀     ", //  7  crust bottom + tagline
+  "       ╷┃╷  ╽ ╷       ", //  8  drips
+  "    ╵  ┃╵  │          ", //  9  drips
 ];
 
 type LetterToken = "letterP" | "letterI" | "letterZ1" | "letterZ2" | "letterA";
@@ -402,23 +458,27 @@ function buildBotBorder(totalW: number): string {
   return theme.border + "╰" + "─".repeat(totalW - 2) + "╯" + R;
 }
 
+const ROW_PAD = "   ";
+const ROW_PAD_VIS = ROW_PAD.length;
+
 function fullWidthRow(content: string, totalW: number): string {
   const theme = getPizzaTheme();
-  const innerW = Math.max(0, totalW - 4);
+  const innerW = Math.max(0, totalW - 2 - ROW_PAD_VIS * 2);
   return (
-    theme.border + "│" + R + " " +
-    fitExact(content, innerW) + " " +
+    theme.border + "│" + R + ROW_PAD +
+    fitExact(content, innerW) + ROW_PAD +
     theme.border + "│" + R
   );
 }
 
-const PANEL_SEP_VIS = 3;
+const PANEL_SEP_VIS = ROW_PAD_VIS + 1 + ROW_PAD_VIS;
+const RESOURCE_PANEL_MAX_WIDTH = 85;
 
 // ── Resources section ───────────────────────────────────────
 
 function buildResourcesLines(
   resources: ResourceList,
-  panelW: number,
+  valueW: number,
 ): string[] {
   const theme = getPizzaTheme();
   const heading =
@@ -441,7 +501,7 @@ function buildResourcesLines(
       lines.push(header + theme.dim + "—" + R);
       continue;
     }
-    const remaining = Math.max(8, panelW - headerVis);
+    const remaining = Math.max(8, valueW);
     const continuationIndent = " ".repeat(headerVis);
 
     const wrappedBodies: string[] = [];
@@ -463,6 +523,20 @@ function buildResourcesLines(
     }
   }
   return lines;
+}
+
+function getResourcesHeaderWidth(resources: ResourceList): number {
+  const theme = getPizzaTheme();
+  const labelW = 12;
+  return Math.max(
+    ...(["skills", "prompts", "extensions", "themes"] as const).map((label) => {
+      const items = resources[label];
+      const header =
+        "  " + theme.key + (label + ":").padEnd(labelW) + R + " " +
+        theme.dim + "(" + items.length + ")" + R + " ";
+      return visibleWidth(header);
+    }),
+  );
 }
 
 type BannerPanel = {
@@ -512,103 +586,58 @@ function pluralize(count: number, singular: string, pluralForm?: string): string
   return `${count} ${noun}`;
 }
 
-function buildShortcutsSummaryBullet(): string {
-  const theme = getPizzaTheme();
-  const dot = " " + theme.divider + "·" + R + " ";
-  return (
-    theme.section + "•" + R + " " +
-    theme.key + "shortcuts + prefixes:" + R + " " +
-    theme.desc + pluralize(SHORTCUTS.length, "shortcut") + R +
-    dot +
-    theme.desc + pluralize(COMMANDS.length, "command prefix", "command prefixes") + R
-  );
+function getShortcutsPanelLines(): string[] {
+  return buildShortcutsPanel();
 }
 
-function buildResourcesSummaryBullet(resources: ResourceList): string {
-  const theme = getPizzaTheme();
-  const dot = " " + theme.divider + "·" + R + " ";
-  const parts = [
-    pluralize(resources.skills.length, "skill"),
-    pluralize(resources.prompts.length, "prompt"),
-    pluralize(resources.extensions.length, "extension"),
-    pluralize(resources.themes.length, "theme"),
-  ];
-  return (
-    theme.section + "•" + R + " " +
-    theme.key + "resources:" + R + " " +
-    parts.map((part) => theme.desc + part + R).join(dot)
-  );
+function getShortcutsPanelWidth(innerW?: number): number {
+  const width = maxLineWidth(getShortcutsPanelLines());
+  return innerW == null ? width : Math.min(innerW, width);
 }
 
-function appendBulletToLastPanel(
-  panels: BannerPanel[],
-  bullet: string,
-  bulletCountByIndex: Map<number, number>,
-): void {
-  const idx = panels.length - 1;
-  if (idx < 0) return;
-
-  const panel = panels[idx];
-  const count = bulletCountByIndex.get(idx) ?? 0;
-  const lines = [
-    ...panel.lines,
-    ...(count === 0 ? [""] : []),
-    bullet,
-  ];
-  panels[idx] = {
-    ...panel,
-    lines,
-    width: maxLineWidth(lines),
-  };
-  bulletCountByIndex.set(idx, count + 1);
+function getResourcesPanelLines(resources: ResourceList, panelW?: number): string[] {
+  return buildResourcesLines(resources, panelW ?? RESOURCE_PANEL_MAX_WIDTH);
 }
 
 function buildPanels(
   logoLines: string[],
   innerW: number,
   resources: ResourceList,
-  resourcesOpen: boolean,
-  shortcutsOpen: boolean,
 ): BannerPanel[] {
-  const panels: BannerPanel[] = [
+  const shortcutLines = getShortcutsPanelLines();
+  const resourceHeaderWidth = getResourcesHeaderWidth(resources);
+  const resourceValueWidth = Math.max(
+    8,
+    Math.min(RESOURCE_PANEL_MAX_WIDTH, innerW - resourceHeaderWidth),
+  );
+  const resourceLines = getResourcesPanelLines(resources, resourceValueWidth);
+
+  return [
     { key: "logo", lines: logoLines, width: maxLineWidth(logoLines) },
+    { key: "shortcuts", lines: shortcutLines, width: maxLineWidth(shortcutLines) },
+    { key: "resources", lines: resourceLines, width: maxLineWidth(resourceLines) },
   ];
-  const bulletCountByIndex = new Map<number, number>();
-
-  if (shortcutsOpen) {
-    const shortcutLines = buildShortcutsPanel();
-    panels.push({
-      key: "shortcuts",
-      lines: shortcutLines,
-      width: maxLineWidth(shortcutLines),
-    });
-  } else {
-    appendBulletToLastPanel(panels, buildShortcutsSummaryBullet(), bulletCountByIndex);
-  }
-
-  if (resourcesOpen) {
-    const resourceLines = buildResourcesLines(resources, innerW);
-    panels.push({
-      key: "resources",
-      lines: resourceLines,
-      width: maxLineWidth(resourceLines),
-    });
-  } else {
-    appendBulletToLastPanel(panels, buildResourcesSummaryBullet(resources), bulletCountByIndex);
-  }
-
-  return panels;
 }
 
 function renderPanelRow(panels: PlacedPanel[], totalW: number): string[] {
   const theme = getPizzaTheme();
-  const separator = " " + theme.border + "│" + R + " ";
+  const separator = ROW_PAD + theme.border + "│" + R + ROW_PAD;
   const maxRows = Math.max(...panels.map((panel) => panel.lines.length));
 
   const rows: string[] = [];
   for (let i = 0; i < maxRows; i++) {
     const content = panels
-      .map((panel) => fitExact(panel.lines[i] ?? "", panel.clampedWidth))
+      .map((panel) => {
+        // Vertically center the logo only — other panels read like a list
+        // (heading + items) and should stay top-aligned.
+        const topPad =
+          panel.key === "logo"
+            ? Math.floor((maxRows - panel.lines.length) / 2)
+            : 0;
+        const idx = i - topPad;
+        const line = idx >= 0 && idx < panel.lines.length ? panel.lines[idx] : "";
+        return fitExact(line, panel.clampedWidth);
+      })
       .join(separator);
     rows.push(fullWidthRow(content, totalW));
   }
@@ -624,26 +653,29 @@ function buildBanner(
   viewWidth: number,
   meta: SessionMeta,
   resources: ResourceList,
-  resourcesOpen: boolean,
-  shortcutsOpen: boolean,
 ): string[] {
   const totalW = Math.max(4, viewWidth);
-  const innerW = Math.max(0, totalW - 4);
+  const innerW = Math.max(0, totalW - 2 - ROW_PAD_VIS * 2);
 
   const logoLines = buildLeftColumn();
-  const panels = buildPanels(logoLines, innerW, resources, resourcesOpen, shortcutsOpen);
+  const panels = buildPanels(logoLines, innerW, resources);
   const panelRows = groupPanelsIntoRows(panels, innerW);
   const rows: string[] = [buildTopBorder(totalW), fullWidthRow("", totalW)];
 
   for (let i = 0; i < panelRows.length; i++) {
     rows.push(...renderPanelRow(panelRows[i], totalW));
     if (i < panelRows.length - 1) {
+      rows.push(fullWidthRow("", totalW));
       rows.push(buildGroupSeparatorRow(totalW));
+      rows.push(fullWidthRow("", totalW));
     }
   }
 
   rows.push(fullWidthRow("", totalW));
-  rows.push(fullWidthRow(" " + formatSessionMeta(meta), totalW));
+  const sessionMeta = formatSessionMeta(meta);
+  if (sessionMeta) {
+    rows.push(fullWidthRow(" " + sessionMeta, totalW));
+  }
   rows.push(buildBotBorder(totalW));
   return rows;
 }
@@ -653,21 +685,15 @@ function buildBanner(
 class PizzaHeader {
   private meta: SessionMeta;
   private resources: ResourceList;
-  private resourcesOpen: boolean;
-  private shortcutsOpen: boolean;
   private cache?: {
     width: number;
-    resourcesOpen: boolean;
-    shortcutsOpen: boolean;
     lines: string[];
   };
   private requestRender?: () => void;
 
-  constructor(meta: SessionMeta, resources: ResourceList, resourcesOpen: boolean, shortcutsOpen: boolean) {
+  constructor(meta: SessionMeta, resources: ResourceList) {
     this.meta = meta;
     this.resources = resources;
-    this.resourcesOpen = resourcesOpen;
-    this.shortcutsOpen = shortcutsOpen;
   }
 
   attach(tui: { requestRender?: () => void } | undefined): void {
@@ -677,15 +703,11 @@ class PizzaHeader {
   render(width: number): string[] {
     if (
       !this.cache ||
-      this.cache.width !== width ||
-      this.cache.resourcesOpen !== this.resourcesOpen ||
-      this.cache.shortcutsOpen !== this.shortcutsOpen
+      this.cache.width !== width
     ) {
       this.cache = {
         width,
-        resourcesOpen: this.resourcesOpen,
-        shortcutsOpen: this.shortcutsOpen,
-        lines: buildBanner(width, this.meta, this.resources, this.resourcesOpen, this.shortcutsOpen),
+        lines: buildBanner(width, this.meta, this.resources),
       };
     }
     return this.cache.lines;
@@ -695,11 +717,9 @@ class PizzaHeader {
     this.cache = undefined;
   }
 
-  update(meta: SessionMeta, resources: ResourceList, resourcesOpen: boolean, shortcutsOpen: boolean): void {
+  update(meta: SessionMeta, resources: ResourceList): void {
     this.meta = meta;
     this.resources = resources;
-    this.resourcesOpen = resourcesOpen;
-    this.shortcutsOpen = shortcutsOpen;
     this.invalidate();
     this.requestRender?.();
   }
@@ -712,22 +732,35 @@ function setOrUpdateHeader(ctx: any, reason?: string): void {
   if (!sessionManager) return;
 
   const existing = HEADER_STATES.get(sessionManager);
-  const effectiveReason = reason ?? existing?.reason ?? "startup";
-  const meta = extractSessionMeta({ reason: effectiveReason }, ctx);
+  const meta = extractSessionMeta(reason ?? existing?.reason, ctx);
   const resources = collectResources(ctx);
 
   if (existing) {
-    existing.reason = effectiveReason;
-    existing.header.update(meta, resources, resourcesExpanded, shortcutsExpanded);
+    existing.reason = meta.reason;
+    existing.header.update(meta, resources);
     return;
   }
 
-  const header = new PizzaHeader(meta, resources, resourcesExpanded, shortcutsExpanded);
-  HEADER_STATES.set(sessionManager, { header, reason: effectiveReason });
+  const header = new PizzaHeader(meta, resources);
+  HEADER_STATES.set(sessionManager, { header, reason: meta.reason });
   ctx.ui.setHeader((tui: { requestRender?: () => void }, _theme: unknown) => {
     header.attach(tui);
     return header;
   });
+}
+
+function updateSessionStatus(ctx: any, reason?: string): void {
+  if (!ctx?.hasUI || !ctx?.ui?.setStatus) return;
+
+  const sessionManager = ctx.sessionManager as object | undefined;
+  const existing = sessionManager ? HEADER_STATES.get(sessionManager) : undefined;
+  const meta = extractSessionMeta(reason ?? existing?.reason, ctx);
+
+  if (existing) {
+    existing.reason = meta.reason;
+  }
+
+  ctx.ui.setStatus(SESSION_STATUS_KEY, formatLiveSessionStatus(meta));
 }
 
 // ── Extension entry point ────────────────────────────────────
@@ -739,9 +772,14 @@ export default function pizzaUiExtension(pi: ExtensionAPI): void {
     if (!ctx.hasUI) return;
 
     latestCtxForHeader = ctx;
+    const sessionManager = ctx.sessionManager as object | undefined;
+    if (sessionManager && !SESSION_STARTED_AT.has(sessionManager)) {
+      SESSION_STARTED_AT.set(sessionManager, new Date());
+    }
     syncActivePalette(ctx);
     ctx.ui.setTitle(`pizza \u00B7 ${basename(ctx.cwd)}`);
     setOrUpdateHeader(ctx, event?.reason);
+    updateSessionStatus(ctx, event?.reason);
   });
 
   pi.on("turn_end", async (_event, ctx) => {
@@ -749,16 +787,12 @@ export default function pizzaUiExtension(pi: ExtensionAPI): void {
       const state = HEADER_STATES.get(ctx.sessionManager as object);
       state?.header.invalidate();
     }
-    setOrUpdateHeader(ctx);
-  });
-
-  pi.on("model_select", async (_event, ctx) => {
-    setOrUpdateHeader(ctx);
+    updateSessionStatus(ctx);
   });
 
   pi.registerCommand("pizza", {
     description:
-      "Show Pizza status, or run `resources`/`shortcuts` to expand/collapse banner sections",
+      "Show Pizza status, or print the resources/shortcuts banner sections",
     handler: async (args, ctx) => {
       const tokens = (args ?? "").trim().split(/\s+/).filter(Boolean);
       const cmd = tokens[0]?.toLowerCase();
@@ -788,7 +822,7 @@ export default function pizzaUiExtension(pi: ExtensionAPI): void {
         `Model: ${model}`,
         `CWD: ${ctx.cwd}`,
         `Theme: ${getActivePizzaThemeName()}`,
-        `Banner: shortcuts ${shortcutsExpanded ? "open" : "collapsed"}, resources ${resourcesExpanded ? "open" : "collapsed"}`,
+        "Banner: resources + shortcuts inline",
       ];
       if (usage?.percent != null) {
         lines.push(`Context: ${usage.percent}%`);
@@ -808,67 +842,31 @@ function pizzaCommandHelpLines(): string[] {
   return [
     "Usage:",
     "  /pizza",
-    "  /pizza resources [toggle|expand|collapse]",
-    "  /pizza shortcuts [toggle|expand|collapse]",
+    "  /pizza resources",
+    "  /pizza shortcuts",
   ];
 }
 
-function parseToggleAction(token?: string): "toggle" | "open" | "close" | "invalid" {
-  if (!token || token.length === 0) return "toggle";
-  const arg = token.toLowerCase();
-  if (arg === "toggle") return "toggle";
-  if (arg === "expand" || arg === "open") return "open";
-  if (arg === "collapse" || arg === "close") return "close";
-  return "invalid";
-}
-
 function runResourcesCommand(tokens: string[], ctx: any): void {
-  const action = parseToggleAction(tokens[0]);
-  if (action === "invalid") {
+  if (tokens.length > 0) {
     emit(ctx, [
-      `Unknown resources action: ${tokens[0]}`,
-      "Try: /pizza resources [toggle|expand|collapse]",
+      `/pizza resources does not take arguments`,
+      "Try: /pizza resources",
     ], "warning");
     return;
   }
 
-  const prev = resourcesExpanded;
-  if (action === "open") resourcesExpanded = true;
-  else if (action === "close") resourcesExpanded = false;
-  else resourcesExpanded = !resourcesExpanded;
-
-  setOrUpdateHeader(ctx);
-  if (prev !== resourcesExpanded) {
-    emit(
-      ctx,
-      [`Resources ${resourcesExpanded ? "expanded" : "collapsed"}`],
-      "info",
-    );
-  }
+  emit(ctx, getResourcesPanelLines(collectResources(ctx)), "info");
 }
 
 function runShortcutsCommand(tokens: string[], ctx: any): void {
-  const action = parseToggleAction(tokens[0]);
-  if (action === "invalid") {
+  if (tokens.length > 0) {
     emit(ctx, [
-      `Unknown shortcuts action: ${tokens[0]}`,
-      "Try: /pizza shortcuts [toggle|expand|collapse]",
+      `/pizza shortcuts does not take arguments`,
+      "Try: /pizza shortcuts",
     ], "warning");
     return;
   }
 
-  const prev = shortcutsExpanded;
-  if (action === "open") shortcutsExpanded = true;
-  else if (action === "close") shortcutsExpanded = false;
-  else shortcutsExpanded = !shortcutsExpanded;
-
-  setOrUpdateHeader(ctx);
-  if (prev !== shortcutsExpanded) {
-    emit(
-      ctx,
-      [`Shortcuts + Prefixes ${shortcutsExpanded ? "expanded" : "collapsed"}`],
-      "info",
-    );
-  }
+  emit(ctx, getShortcutsPanelLines(), "info");
 }
-

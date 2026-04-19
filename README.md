@@ -39,9 +39,9 @@ pi --control-session mybot --send-session-message "status update?"
 
 **`/run`**, **`/parallel`** — Subagent delegation with async support and parallel execution.
 
-**`/pizza`** — Pizza version, Pi compatibility, model, cwd, active theme, banner section states, and context at a glance.
-  - `/pizza resources [toggle|expand|collapse]` — control the resources section of the banner.
-  - `/pizza shortcuts [toggle|expand|collapse]` — control the shortcuts + prefixes section of the banner.
+**`/pizza`** — Pizza version, Pi compatibility, model, cwd, active theme, banner layout, and context at a glance.
+  - `/pizza resources` — print the resources section using the same formatting as the banner.
+  - `/pizza shortcuts` — print the shortcuts + prefixes section using the same formatting as the banner.
   - `/pizza help` — show quick usage.
 
 **`/theme`** — Pick a theme interactively, or `/theme <name>` to switch directly. Pizza's palette follows Pi's active theme.

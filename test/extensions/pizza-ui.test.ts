@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import pizzaUiExtension, {
   maybeWarnAboutPiCompatibility,
 } from "../../extensions/pizza-ui.ts";
@@ -79,6 +79,11 @@ function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
+function getLastStatus(ctx: ReturnType<typeof createMockContext>, key: string): string | undefined {
+  const calls = ctx.ui.setStatus.mock.calls.filter(([statusKey]) => statusKey === key);
+  return calls.at(-1)?.[1] as string | undefined;
+}
+
 describe("pizza-ui extension", () => {
   it("registers session_start and /pizza", () => {
     const { api, registeredEvents, registeredCommands } = createMockApi();
@@ -86,7 +91,7 @@ describe("pizza-ui extension", () => {
 
     expect(registeredEvents.has("session_start")).toBe(true);
     expect(registeredEvents.has("turn_end")).toBe(true);
-    expect(registeredEvents.has("model_select")).toBe(true);
+    expect(registeredEvents.has("model_select")).toBe(false);
     expect(registeredCommands.has("pizza")).toBe(true);
   });
 
@@ -180,8 +185,9 @@ describe("pizza-ui extension", () => {
     const output = renderHeader(ctx, 140);
     const lines = output.split("\n");
     // Keep at least the expected structural rows (top/bottom borders, padding,
-    // content, and session meta), while allowing banner sections to grow.
-    expect(lines.length).toBeGreaterThanOrEqual(18);
+    // and content), while allowing banner sections to grow. Fresh sessions may
+    // omit the session-meta row entirely.
+    expect(lines.length).toBeGreaterThanOrEqual(16);
 
     // Second line (after top border) should be empty padding (only borders + spaces)
     const paddingLine = stripAnsi(lines[1]);
@@ -189,7 +195,7 @@ describe("pizza-ui extension", () => {
     expect(paddingContent.trim()).toBe("");
   });
 
-  it("shows 'New session' for fresh startup", async () => {
+  it("omits the startup label from the banner for fresh sessions", async () => {
     const { api, registeredEvents } = createMockApi();
     pizzaUiExtension(api as any);
 
@@ -197,8 +203,36 @@ describe("pizza-ui extension", () => {
     await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
 
     const output = renderHeader(ctx);
-    expect(output).toContain("New session");
-    expect(output).toContain("Anthropic: sonnet");
+    expect(output).not.toContain("New session");
+  });
+
+  it("shows session counts and runtime in the live status for fresh sessions", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true);
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+
+    const status = stripAnsi(getLastStatus(ctx, "pizza.hud.20.session") ?? "");
+    expect(status).toContain("0 msgs");
+    expect(status).toContain("0 turns");
+    expect(status).toContain("<1m running");
+  });
+
+  it("shows the session name for fresh sessions instead of a new label", async () => {
+    const { api, registeredEvents } = createMockApi();
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true, { sessionName: "feature-auth" });
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+
+    const output = renderHeader(ctx);
+    expect(output).toContain('"feature-auth"');
+    expect(output).not.toContain("New session");
+
+    const status = stripAnsi(getLastStatus(ctx, "pizza.hud.20.session") ?? "");
+    expect(status).toContain('"feature-auth"');
+    expect(status).not.toContain("New session");
   });
 
   it("shows 'Resumed' with session metadata for resumed session", async () => {
@@ -230,12 +264,10 @@ describe("pizza-ui extension", () => {
     const output = renderHeader(ctx);
     expect(output).toContain("Resumed");
     expect(output).toContain('"auth-fix"');
-    expect(output).toContain("2 msgs");
-    expect(output).toContain("Anthropic: sonnet");
   });
 
-  it("shows provider-aware labels in the banner and /pizza output", async () => {
-    const { api, registeredEvents, registeredCommands } = createMockApi();
+  it("shows provider-aware labels in /pizza output", async () => {
+    const { api, registeredCommands } = createMockApi();
     pizzaUiExtension(api as any);
 
     const ctx = createMockContext(true, {
@@ -245,72 +277,43 @@ describe("pizza-ui extension", () => {
         provider: "openrouter",
       },
     });
-    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
-
-    const output = renderHeader(ctx);
-    expect(output).toContain("OpenRouter: Claude Opus 4.1");
-    expect(output).not.toContain("OpenRouter: Anthropic: Claude Opus 4.1");
-
     await registeredCommands.get("pizza").handler("", ctx);
     const msg = ctx.ui.notify.mock.calls.at(-1)![0] as string;
     expect(msg).toContain("Model: OpenRouter: Claude Opus 4.1");
   });
 
-  it("updates the banner when the model changes", async () => {
+  it("updates live session status without requesting a header redraw on turn_end", async () => {
     const { api, registeredEvents } = createMockApi();
     pizzaUiExtension(api as any);
 
-    const ctx = createMockContext(true, {
-      model: { id: "claude-sonnet-4-20250514", name: "sonnet", provider: "anthropic" },
-    });
-    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
-    expect(renderHeader(ctx)).toContain("Anthropic: sonnet");
-
-    ctx.model = {
-      id: "anthropic/claude-opus-4.6",
-      name: "Anthropic: Claude Opus 4.6",
-      provider: "openrouter",
-    };
-    await registeredEvents.get("model_select")![0]({}, ctx);
-
-    const output = renderHeader(ctx);
-    expect(output).toContain("OpenRouter: Claude Opus 4.6");
-    expect(output).not.toContain("Anthropic: sonnet");
-  });
-
-  it("reuses the same header component across updates", async () => {
-    const { api, registeredEvents } = createMockApi();
-    pizzaUiExtension(api as any);
-
-    const ctx = createMockContext(true, {
-      model: { id: "claude-sonnet-4-20250514", name: "sonnet", provider: "anthropic" },
-      entries: [
-        {
-          type: "message",
-          id: "1",
-          parentId: null,
-          timestamp: new Date().toISOString(),
-          message: { role: "user", content: "Inspect the banner updates" },
-        },
-      ],
-    });
+    const entries: any[] = [];
+    const ctx = createMockContext(true, { entries });
 
     await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
     const factory = ctx.ui.setHeader.mock.calls[0][0] as Function;
     const tui = { requestRender: vi.fn() };
     const header = factory(tui, null);
+    const before = header.render(120).join("\n");
 
-    ctx.model = {
-      id: "anthropic/claude-opus-4.6",
-      name: "Anthropic: Claude Opus 4.6",
-      provider: "openrouter",
-    };
-    await registeredEvents.get("model_select")![0]({}, ctx);
+    entries.push({
+      type: "message",
+      id: "1",
+      parentId: null,
+      timestamp: new Date().toISOString(),
+      message: { role: "user", content: "Inspect the banner updates" },
+    });
     await registeredEvents.get("turn_end")![0]({}, ctx);
 
     expect(ctx.ui.setHeader).toHaveBeenCalledTimes(1);
-    expect(tui.requestRender).toHaveBeenCalledTimes(2);
-    expect(header.render(120).join("\n")).toContain("OpenRouter: Claude Opus 4.6");
+    expect(tui.requestRender).not.toHaveBeenCalled();
+    expect(header.render(120).join("\n")).toBe(before);
+
+    const status = stripAnsi(getLastStatus(ctx, "pizza.hud.20.session") ?? "");
+    expect(status).toContain('"Inspect the banner updates"');
+    expect(status).toContain("1 msg");
+    expect(status).toContain("1 turn");
+    expect(status).toContain("<1m running");
+    expect(status).not.toContain("New session");
   });
 
   it("shows topic from first user message when no session name", async () => {
@@ -351,22 +354,27 @@ describe("pizza-ui extension", () => {
   });
 
   it("uses a single top row for logo, shortcuts, and resources when wide enough", async () => {
-    const { api, registeredEvents, registeredCommands } = createMockApi({
+    const { api, registeredEvents } = createMockApi({
       commands: RESOURCE_COMMANDS,
     });
     pizzaUiExtension(api as any);
 
     const ctx = withThemesSurface(createMockContext(true));
     await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
-    await registeredCommands.get("pizza").handler("resources expand", ctx);
 
-    const lines = stripAnsi(renderHeader(ctx, 220)).split("\n");
-    const topPanelLine = lines.find((line) =>
-      line.includes("▄████") &&
-      line.includes("▾ shortcuts + prefixes") &&
-      line.includes("▾ resources"),
+    const output = stripAnsi(renderHeader(ctx, 220));
+    const lines = output.split("\n");
+    const headingLine = lines.find((line) =>
+      line.includes("▾ shortcuts + prefixes") && line.includes("▾ resources"),
     );
-    expect(topPanelLine).toBeTruthy();
+    expect(headingLine).toBeTruthy();
+    expect(headingLine!.indexOf("▾ shortcuts + prefixes")).toBeLessThan(
+      headingLine!.indexOf("▾ resources"),
+    );
+    // All three panels share one panel row → no ├──┤ inter-row divider.
+    expect(output).not.toContain("├");
+    // Logo is vertically centered, so pizza crust is not on the heading line.
+    expect(output).toContain("▄████");
   });
 
   it("falls back to stacked layout for narrow terminals", async () => {
@@ -382,7 +390,7 @@ describe("pizza-ui extension", () => {
     expect(output).toContain("├");
     expect(output).toContain("●");
     expect(output).toContain("interrupt");
-    expect(output).toContain("New session");
+    expect(output).not.toContain("New session");
   });
 
   it("no rendered line exceeds the requested width, even with a long session meta", async () => {
@@ -433,6 +441,7 @@ describe("pizza-ui extension", () => {
 
     expect(ctx.ui.setTitle).not.toHaveBeenCalled();
     expect(ctx.ui.setHeader).not.toHaveBeenCalled();
+    expect(ctx.ui.setStatus).not.toHaveBeenCalled();
   });
 
   it("warns when Pi is outside Pizza's supported range", () => {
@@ -454,7 +463,7 @@ describe("pizza-ui extension", () => {
     expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 
-  it("/pizza shows version, model, cwd, banner states, and context", async () => {
+  it("/pizza shows version, model, cwd, banner layout, and context", async () => {
     const { api, registeredCommands } = createMockApi();
     pizzaUiExtension(api as any);
 
@@ -463,7 +472,6 @@ describe("pizza-ui extension", () => {
       model: { id: "claude-sonnet-4-20250514", name: "sonnet", provider: "anthropic" },
       percent: 15,
     });
-    await registeredCommands.get("pizza").handler("resources collapse", ctx);
     await registeredCommands.get("pizza").handler("", ctx);
 
     const msg = ctx.ui.notify.mock.calls.at(-1)![0] as string;
@@ -472,7 +480,7 @@ describe("pizza-ui extension", () => {
     expect(msg).toContain("compatible with 0.67.x");
     expect(msg).toContain("Anthropic: sonnet");
     expect(msg).toContain("/home/user/project");
-    expect(msg).toContain("Banner: shortcuts open, resources collapsed");
+    expect(msg).toContain("Banner: resources + shortcuts inline");
     expect(msg).toContain("15%");
   });
 
@@ -530,29 +538,24 @@ function withThemesSurface(ctx: ReturnType<typeof createMockContext>) {
 }
 
 describe("/pizza resources subcommand", () => {
-  afterEach(async () => {
-    // Reset module-level expansion flag to collapsed.
-    const { api, registeredCommands } = createMockApi({ commands: [] });
-    pizzaUiExtension(api as any);
-    const ctx = withThemesSurface(createMockContext(true));
-    await registeredCommands.get("pizza").handler("resources collapse", ctx);
-  });
-
-  it("renders a collapsed resources row with category counts by default", async () => {
+  it("shows the expanded resources section in the banner by default", async () => {
     const { api, registeredEvents, registeredCommands } = createMockApi({ commands: RESOURCE_COMMANDS });
     pizzaUiExtension(api as any);
 
     const ctx = withThemesSurface(createMockContext(true));
-    await registeredCommands.get("pizza").handler("resources collapse", ctx);
     await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
 
     const output = stripAnsi(renderHeader(ctx, 140));
-    expect(output).toContain("• resources: 2 skills · 1 prompt · 2 extensions · 2 themes");
-    // Collapsed form: resource names should not be listed.
-    expect(output).not.toContain("alpha");
+    expect(output).toContain("▾ resources");
+    expect(output).toContain("skills:");
+    expect(output).toContain("alpha");
+    expect(output).toContain("beta");
+    expect(output).toContain("hello");
+    expect(output).toContain("todo");
+    expect(output).toContain("pizzeria");
   });
 
-  it("/pizza resources toggles to expanded and lists names per category", async () => {
+  it("/pizza resources prints the same formatted section content", async () => {
     const { api, registeredEvents, registeredCommands } = createMockApi({
       commands: RESOURCE_COMMANDS,
     });
@@ -562,7 +565,9 @@ describe("/pizza resources subcommand", () => {
     await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
     await registeredCommands.get("pizza").handler("resources", ctx);
 
-    const output = stripAnsi(renderHeader(ctx, 140));
+    const [msg, level] = ctx.ui.notify.mock.calls.at(-1)!;
+    const output = stripAnsi(msg as string);
+    expect(level).toBe("info");
     expect(output).toContain("▾ resources");
     expect(output).toContain("skills:");
     expect(output).toContain("alpha");
@@ -571,28 +576,9 @@ describe("/pizza resources subcommand", () => {
     expect(output).toContain("hello");
     expect(output).toContain("todo");
     expect(output).toContain("pizzeria");
-
-    const last = ctx.ui.notify.mock.calls.at(-1)!;
-    expect(last[0]).toBe("Resources expanded");
   });
 
-  it("/pizza resources collapse returns to the compact form", async () => {
-    const { api, registeredEvents, registeredCommands } = createMockApi({
-      commands: RESOURCE_COMMANDS,
-    });
-    pizzaUiExtension(api as any);
-
-    const ctx = withThemesSurface(createMockContext(true));
-    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
-    await registeredCommands.get("pizza").handler("resources expand", ctx);
-    await registeredCommands.get("pizza").handler("resources collapse", ctx);
-
-    const output = stripAnsi(renderHeader(ctx, 140));
-    expect(output).toContain("• resources: 2 skills · 1 prompt · 2 extensions · 2 themes");
-    expect(output).not.toContain("alpha");
-  });
-
-  it("/pizza resources warns on invalid actions", async () => {
+  it("/pizza resources warns on unexpected arguments", async () => {
     const { api, registeredEvents, registeredCommands } = createMockApi({
       commands: RESOURCE_COMMANDS,
     });
@@ -604,10 +590,11 @@ describe("/pizza resources subcommand", () => {
 
     const [msg, level] = ctx.ui.notify.mock.calls.at(-1)!;
     expect(level).toBe("warning");
-    expect(msg).toContain("Unknown resources action: nope");
+    expect(msg).toContain("/pizza resources does not take arguments");
+    expect(msg).toContain("Try: /pizza resources");
   });
 
-  it("wraps expanded resource lists that overflow the banner width", async () => {
+  it("wraps resource lists that overflow the banner width", async () => {
     const manyPrompts = Array.from({ length: 20 }, (_, i) => `prompt-name-${i}`);
     const manyThemes = Array.from({ length: 15 }, (_, i) => `theme-name-${i}`);
     const commands = manyPrompts.map(
@@ -624,7 +611,6 @@ describe("/pizza resources subcommand", () => {
       manyThemes.map((name) => ({ name, path: `/themes/${name}.json` })),
     );
     await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
-    await registeredCommands.get("pizza").handler("resources expand", ctx);
 
     const width = 100;
     const output = renderHeader(ctx, width);
@@ -637,18 +623,34 @@ describe("/pizza resources subcommand", () => {
       expect(stripAnsi(line).length).toBeLessThanOrEqual(width);
     }
   });
+
+  it("caps the resources panel width so it still wraps on wide terminals", async () => {
+    const promptNames = Array.from({ length: 6 }, (_, i) => `prompt-name-${i}`);
+    const commands = promptNames.map(
+      (name): { name: string; source: "prompt" } => ({ name, source: "prompt" }),
+    );
+
+    const { api, registeredEvents, registeredCommands } = createMockApi({
+      commands,
+    });
+    pizzaUiExtension(api as any);
+
+    const ctx = createMockContext(true);
+    (ctx.ui as any).getAllThemes = vi.fn(() => []);
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+
+    const output = stripAnsi(renderHeader(ctx, 220));
+    const promptLines = output
+      .split("\n")
+      .filter((line) => line.includes("prompt-name-"));
+
+    expect(promptLines.length).toBeGreaterThan(1);
+    for (const name of promptNames) expect(output).toContain(name);
+  });
 });
 
 describe("/pizza shortcuts subcommand", () => {
-  afterEach(async () => {
-    // Reset module-level expansion flag to expanded (default behavior).
-    const { api, registeredCommands } = createMockApi({ commands: [] });
-    pizzaUiExtension(api as any);
-    const ctx = withThemesSurface(createMockContext(true));
-    await registeredCommands.get("pizza").handler("shortcuts expand", ctx);
-  });
-
-  it("/pizza shortcuts collapse hides the shortcuts table", async () => {
+  it("shows the expanded shortcuts section in the banner by default", async () => {
     const { api, registeredEvents, registeredCommands } = createMockApi({
       commands: RESOURCE_COMMANDS,
     });
@@ -656,54 +658,34 @@ describe("/pizza shortcuts subcommand", () => {
 
     const ctx = withThemesSurface(createMockContext(true));
     await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
-    await registeredCommands.get("pizza").handler("shortcuts collapse", ctx);
-
-    const output = stripAnsi(renderHeader(ctx, 140));
-    expect(output).toContain("• shortcuts + prefixes: 8 shortcuts · 3 command prefixes");
-    expect(output).not.toContain("Shift+Tab");
-
-    const last = ctx.ui.notify.mock.calls.at(-1)!;
-    expect(last[0]).toBe("Shortcuts + Prefixes collapsed");
-  });
-
-  it("renders full-word bullet summaries for collapsed sections", async () => {
-    const { api, registeredEvents, registeredCommands } = createMockApi({
-      commands: RESOURCE_COMMANDS,
-    });
-    pizzaUiExtension(api as any);
-
-    const ctx = withThemesSurface(createMockContext(true));
-    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
-    await registeredCommands.get("pizza").handler("shortcuts collapse", ctx);
-    await registeredCommands.get("pizza").handler("resources collapse", ctx);
-
-    const output = stripAnsi(renderHeader(ctx, 240));
-    expect(output).toContain("• shortcuts + prefixes: 8 shortcuts · 3 command prefixes");
-    expect(output).toContain("• resources: 2 skills · 1 prompt · 2 extensions · 2 themes");
-  });
-
-  it("/pizza shortcuts expand restores the shortcuts + prefixes table", async () => {
-    const { api, registeredEvents, registeredCommands } = createMockApi({
-      commands: RESOURCE_COMMANDS,
-    });
-    pizzaUiExtension(api as any);
-
-    const ctx = withThemesSurface(createMockContext(true));
-    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
-    await registeredCommands.get("pizza").handler("shortcuts collapse", ctx);
-    await registeredCommands.get("pizza").handler("shortcuts expand", ctx);
 
     const output = stripAnsi(renderHeader(ctx, 140));
     expect(output).toContain("▾ shortcuts + prefixes");
     expect(output).toContain("SHORTCUTS");
     expect(output).toContain("PREFIXES");
     expect(output).toContain("Shift+Tab");
-
-    const last = ctx.ui.notify.mock.calls.at(-1)!;
-    expect(last[0]).toBe("Shortcuts + Prefixes expanded");
   });
 
-  it("/pizza shortcuts warns on invalid actions", async () => {
+  it("/pizza shortcuts prints the same formatted section content", async () => {
+    const { api, registeredEvents, registeredCommands } = createMockApi({
+      commands: RESOURCE_COMMANDS,
+    });
+    pizzaUiExtension(api as any);
+
+    const ctx = withThemesSurface(createMockContext(true));
+    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
+    await registeredCommands.get("pizza").handler("shortcuts", ctx);
+
+    const [msg, level] = ctx.ui.notify.mock.calls.at(-1)!;
+    const output = stripAnsi(msg as string);
+    expect(level).toBe("info");
+    expect(output).toContain("▾ shortcuts + prefixes");
+    expect(output).toContain("SHORTCUTS");
+    expect(output).toContain("PREFIXES");
+    expect(output).toContain("Shift+Tab");
+  });
+
+  it("/pizza shortcuts warns on unexpected arguments", async () => {
     const { api, registeredEvents, registeredCommands } = createMockApi({
       commands: RESOURCE_COMMANDS,
     });
@@ -715,6 +697,7 @@ describe("/pizza shortcuts subcommand", () => {
 
     const [msg, level] = ctx.ui.notify.mock.calls.at(-1)!;
     expect(level).toBe("warning");
-    expect(msg).toContain("Unknown shortcuts action: nope");
+    expect(msg).toContain("/pizza shortcuts does not take arguments");
+    expect(msg).toContain("Try: /pizza shortcuts");
   });
 });
