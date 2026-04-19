@@ -3,7 +3,7 @@ import pizzaStatusExtension from "../../extensions/pizza-status.ts";
 import {
   DEFAULT_PIZZA_THEME,
   setActivePizzaTheme,
-} from "../../extensions/shared/pizza-theme.ts";
+} from "../../extensions/shared/pizza-palette.ts";
 
 function createMockApi() {
   const registeredEvents = new Map<string, Function[]>();
@@ -293,7 +293,7 @@ describe("pizza-status extension", () => {
       expect(ctx.ui.setStatus).toHaveBeenCalledTimes(1);
       const firstRaw = ctx.ui.setStatus.mock.calls[0][1] as string;
 
-      setActivePizzaTheme("cyberpunk-pizzeria");
+      setActivePizzaTheme("dracula");
 
       expect(ctx.ui.setStatus).toHaveBeenCalledTimes(2);
       const secondRaw = ctx.ui.setStatus.mock.calls[1][1] as string;

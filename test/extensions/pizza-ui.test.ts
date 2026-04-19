@@ -1,14 +1,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import pizzaUiExtension, {
   maybeWarnAboutPiCompatibility,
 } from "../../extensions/pizza-ui.ts";
-import {
-  DEFAULT_PIZZA_THEME,
-  getActivePizzaThemeName,
-  setActivePizzaTheme,
-} from "../../extensions/shared/pizza-theme.ts";
 
 const pkg = JSON.parse(
   readFileSync(resolve(__dirname, "..", "..", "package.json"), "utf-8"),
@@ -472,154 +467,6 @@ describe("pizza-ui extension", () => {
   });
 });
 
-/**
- * Helper: extend the mock context with the theme-switching surface
- * (`ctx.ui.setTheme`, `ctx.ui.theme`, `ctx.ui.getAllThemes`) so /pizza theme
- * has something to talk to.
- */
-function withThemeSurface(ctx: any, initial = "retro-pizzeria") {
-  ctx.ui.theme = { name: initial };
-  ctx.ui.getAllThemes = vi.fn(() => [
-    { name: "retro-pizzeria", path: undefined },
-    { name: "cyberpunk-pizzeria", path: undefined },
-  ]);
-  ctx.ui.setTheme = vi.fn((name: string) => {
-    ctx.ui.theme = { name };
-    return { success: true };
-  });
-  ctx.ui.select = vi.fn(async (_title: string, _options: string[]) => undefined);
-  return ctx;
-}
-
-describe("/pizza theme subcommand", () => {
-  beforeEach(() => {
-    setActivePizzaTheme(DEFAULT_PIZZA_THEME);
-  });
-
-  afterEach(() => {
-    setActivePizzaTheme(DEFAULT_PIZZA_THEME);
-  });
-
-  it("opens a selector when /pizza theme runs without an argument", async () => {
-    const { api, registeredCommands } = createMockApi();
-    pizzaUiExtension(api as any);
-
-    const ctx = withThemeSurface(createMockContext(true));
-    ctx.ui.select = vi.fn(async () => "cyberpunk-pizzeria");
-
-    await registeredCommands.get("pizza").handler("theme", ctx);
-
-    expect(ctx.ui.select).toHaveBeenCalledTimes(1);
-    const [title, options] = ctx.ui.select.mock.calls[0];
-    expect(title).toContain("current: retro-pizzeria");
-    expect(options).toEqual(["cyberpunk-pizzeria", "retro-pizzeria"]);
-
-    expect(ctx.ui.setTheme).toHaveBeenCalledWith("cyberpunk-pizzeria");
-    expect(getActivePizzaThemeName()).toBe("cyberpunk-pizzeria");
-    const msg = ctx.ui.notify.mock.calls.at(-1)![0] as string;
-    expect(msg).toContain("Theme: cyberpunk-pizzeria");
-  });
-
-  it("leaves state unchanged when the selector is cancelled", async () => {
-    const { api, registeredCommands } = createMockApi();
-    pizzaUiExtension(api as any);
-
-    const ctx = withThemeSurface(createMockContext(true));
-    ctx.ui.select = vi.fn(async () => undefined);
-
-    await registeredCommands.get("pizza").handler("theme", ctx);
-
-    expect(ctx.ui.select).toHaveBeenCalledTimes(1);
-    expect(ctx.ui.setTheme).not.toHaveBeenCalled();
-    expect(ctx.ui.notify).not.toHaveBeenCalled();
-    expect(getActivePizzaThemeName()).toBe("retro-pizzeria");
-  });
-
-  it("falls back to a printed list when no select UI is available", async () => {
-    const { api, registeredCommands } = createMockApi();
-    pizzaUiExtension(api as any);
-
-    const ctx = withThemeSurface(createMockContext(true));
-    delete (ctx.ui as any).select;
-
-    await registeredCommands.get("pizza").handler("theme", ctx);
-
-    const msg = ctx.ui.notify.mock.calls.at(-1)![0] as string;
-    expect(msg).toContain("pizza themes");
-    expect(msg).toContain("retro-pizzeria");
-    expect(msg).toContain("cyberpunk-pizzeria");
-    expect(msg).toContain("\u2192 retro-pizzeria");
-  });
-
-  it("flips both Pi and Pizza in a single call", async () => {
-    const { api, registeredEvents, registeredCommands } = createMockApi();
-    pizzaUiExtension(api as any);
-
-    const ctx = withThemeSurface(createMockContext(true));
-    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
-    await registeredCommands.get("pizza").handler("theme cyberpunk-pizzeria", ctx);
-
-    expect(ctx.ui.setTheme).toHaveBeenCalledWith("cyberpunk-pizzeria");
-    expect(getActivePizzaThemeName()).toBe("cyberpunk-pizzeria");
-    const msg = ctx.ui.notify.mock.calls.at(-1)![0] as string;
-    expect(msg).toContain("Theme: cyberpunk-pizzeria");
-  });
-
-  it("turn_end follows pi-originated theme changes", async () => {
-    const { api, registeredEvents } = createMockApi();
-    pizzaUiExtension(api as any);
-
-    const ctx = withThemeSurface(createMockContext(true));
-    await registeredEvents.get("session_start")![0]({ reason: "startup" }, ctx);
-    expect(getActivePizzaThemeName()).toBe("retro-pizzeria");
-
-    // Simulate pi's own /theme command flipping the theme out-of-band.
-    ctx.ui.theme = { name: "cyberpunk-pizzeria" };
-    await registeredEvents.get("turn_end")![0]({}, ctx);
-    expect(getActivePizzaThemeName()).toBe("cyberpunk-pizzeria");
-  });
-
-  it("warns and leaves state untouched when pi's setTheme fails", async () => {
-    const { api, registeredCommands } = createMockApi();
-    pizzaUiExtension(api as any);
-
-    const ctx = withThemeSurface(createMockContext(true));
-    ctx.ui.setTheme = vi.fn(() => ({ success: false, error: "boom" }));
-    await registeredCommands.get("pizza").handler("theme cyberpunk-pizzeria", ctx);
-
-    expect(getActivePizzaThemeName()).toBe("retro-pizzeria");
-    const call = ctx.ui.notify.mock.calls.at(-1)!;
-    expect(call[0]).toContain("boom");
-    expect(call[1]).toBe("warning");
-  });
-
-  it("warns on unknown theme names without changing state", async () => {
-    const { api, registeredCommands } = createMockApi();
-    pizzaUiExtension(api as any);
-
-    const ctx = withThemeSurface(createMockContext(true));
-    await registeredCommands.get("pizza").handler("theme nope", ctx);
-
-    expect(getActivePizzaThemeName()).toBe("retro-pizzeria");
-    expect(ctx.ui.setTheme).not.toHaveBeenCalled();
-    const call = ctx.ui.notify.mock.calls.at(-1)!;
-    expect(call[0]).toContain("Unknown theme: nope");
-    expect(call[1]).toBe("warning");
-  });
-
-  it("/pizza shows the active theme", async () => {
-    const { api, registeredCommands } = createMockApi();
-    pizzaUiExtension(api as any);
-
-    const ctx = withThemeSurface(createMockContext(true));
-    await registeredCommands.get("pizza").handler("theme cyberpunk-pizzeria", ctx);
-    await registeredCommands.get("pizza").handler("", ctx);
-
-    const msg = ctx.ui.notify.mock.calls.at(-1)![0] as string;
-    expect(msg).toContain("Theme: cyberpunk-pizzeria");
-  });
-});
-
 const RESOURCE_COMMANDS: Array<{ name: string; source: "skill" | "prompt" | "extension" }> = [
   { name: "skill:alpha", source: "skill" },
   { name: "skill:beta", source: "skill" },
@@ -630,8 +477,8 @@ const RESOURCE_COMMANDS: Array<{ name: string; source: "skill" | "prompt" | "ext
 
 function withThemesSurface(ctx: ReturnType<typeof createMockContext>) {
   (ctx.ui as any).getAllThemes = vi.fn(() => [
-    { name: "retro-pizzeria", path: "/themes/retro.json" },
-    { name: "cyberpunk-pizzeria", path: "/themes/cyber.json" },
+    { name: "pizzeria", path: "/themes/pizzeria.json" },
+    { name: "dracula", path: "/themes/dracula.json" },
   ]);
   return ctx;
 }
@@ -681,7 +528,7 @@ describe("/pizza resources subcommand", () => {
     expect(output).not.toContain("skill:alpha");
     expect(output).toContain("hello");
     expect(output).toContain("todo");
-    expect(output).toContain("retro-pizzeria");
+    expect(output).toContain("pizzeria");
 
     const last = ctx.ui.notify.mock.calls.at(-1)!;
     expect(last[0]).toBe("Resources expanded");

@@ -4,7 +4,7 @@ import {
   CustomEditor,
 } from "@mariozechner/pi-coding-agent";
 import type { EditorTheme, TUI } from "@mariozechner/pi-tui";
-import { getPizzaTheme, paint } from "./shared/pizza-theme.ts";
+import { getPizzaTheme, paint } from "./shared/pizza-palette.ts";
 
 export function isBashInput(text: string): boolean {
   return text.trimStart().startsWith("!");

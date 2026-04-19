@@ -1,5 +1,5 @@
 /**
- * Pizza theme loader.
+ * Pizza palette loader.
  *
  * The JSON theme file is the single source of truth for every color Pizza
  * prints. Pi's own color keys live in the `colors` section (52 tokens the Pi
@@ -9,9 +9,11 @@
  * parses the file at runtime to materialize its palette.
  *
  * Flipping the active Pi theme flips Pizza too: one JSON per look, one switch.
+ * This module owns the palette side of that story; the Pi side is driven by
+ * `ctx.ui.setTheme()`, and `syncActivePalette()` mirrors it back into Pizza.
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -234,8 +236,17 @@ export function loadPizzaThemeFromPath(jsonPath: string, mode?: ColorMode): Pizz
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BUNDLED_DIR = join(__dirname, "themes");
 
-const BUNDLED_NAMES = ["retro-pizzeria", "cyberpunk-pizzeria"] as const;
-export const DEFAULT_PIZZA_THEME = BUNDLED_NAMES[0];
+export const DEFAULT_PIZZA_THEME = "pizzeria";
+
+function discoverBundledNames(): string[] {
+  try {
+    return readdirSync(BUNDLED_DIR)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => f.slice(0, -".json".length));
+  } catch {
+    return [DEFAULT_PIZZA_THEME];
+  }
+}
 
 interface Registration {
   path: string;
@@ -269,8 +280,11 @@ const sharedState: PizzaThemeSharedState =
   });
 
 function registerBundled(): void {
-  for (const n of BUNDLED_NAMES) {
-    if (sharedState.registry.has(n)) continue;
+  // Pi loads each extension through its own jiti instance, so this module is
+  // imported multiple times per startup. Skip re-scanning once the shared
+  // registry has been populated by an earlier copy.
+  if (sharedState.registry.size > 0) return;
+  for (const n of discoverBundledNames()) {
     const path = join(BUNDLED_DIR, `${n}.json`);
     try {
       sharedState.registry.set(n, { path, theme: loadPizzaThemeFromPath(path) });
@@ -282,9 +296,9 @@ function registerBundled(): void {
 registerBundled();
 
 /**
- * Register a theme file at an arbitrary path. Used by pizza-ui to pick up
- * every theme Pi knows about (including user custom themes), so
- * `/pizza theme <name>` can flip Pi and Pizza together.
+ * Register a theme file at an arbitrary path. Called from `syncActivePalette`
+ * so Pizza can follow every theme Pi knows about — bundled, user, or custom —
+ * whenever `/theme` (or Ctrl+X/Ctrl+Q) flips Pi.
  */
 export function registerPizzaThemePath(name: string, path: string): PizzaTheme | null {
   try {
@@ -362,4 +376,33 @@ export function reloadPizzaTheme(name: string): PizzaTheme | null {
 
 export function paint(token: string, text: string): string {
   return `${token}${text}${ANSI_RESET}`;
+}
+
+interface PaletteSyncContext {
+  hasUI?: boolean;
+  ui?: {
+    theme?: { name?: string };
+    getAllThemes?: () => Array<{ name: string; path?: string }>;
+  };
+}
+
+/**
+ * Mirror Pi's active theme into Pizza. Returns true iff the active palette
+ * actually changed, so callers can short-circuit cache invalidation.
+ */
+export function syncActivePalette(ctx: PaletteSyncContext): boolean {
+  const piThemeName = ctx?.ui?.theme?.name;
+
+  const allThemes = ctx?.ui?.getAllThemes?.() ?? [];
+  for (const { name, path } of allThemes) {
+    if (path && !hasPizzaTheme(name)) {
+      registerPizzaThemePath(name, path);
+    }
+  }
+
+  const target =
+    piThemeName && hasPizzaTheme(piThemeName) ? piThemeName : DEFAULT_PIZZA_THEME;
+  if (target === getActivePizzaThemeName()) return false;
+  setActivePizzaTheme(target);
+  return true;
 }

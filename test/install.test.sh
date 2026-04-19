@@ -713,7 +713,7 @@ test_uninstall_restores_prior_quietstartup_value() {
     cat >"$settings_file" <<'EOF'
 {
   "quietStartup": false,
-  "theme": "retro-pizzeria"
+  "theme": "pizzeria"
 }
 EOF
 
@@ -731,7 +731,7 @@ EOF
     restored="$(json_get "$settings_file" quietStartup)"
     theme="$(json_get "$settings_file" theme)"
     if [ "$restored" = "false" ]; then pass "quietStartup restored to false"; else fail "quietStartup not restored" "got: $restored"; fi
-    if [ "$theme" = '"retro-pizzeria"' ]; then pass "unrelated keys preserved"; else fail "theme not preserved" "got: $theme"; fi
+    if [ "$theme" = '"pizzeria"' ]; then pass "unrelated keys preserved"; else fail "theme not preserved" "got: $theme"; fi
 
     destroy_env
 }
@@ -766,7 +766,7 @@ test_uninstall_removes_only_quietstartup_if_no_prior_key() {
     mkdir -p "$(dirname "$settings_file")"
     cat >"$settings_file" <<'EOF'
 {
-  "theme": "retro-pizzeria"
+  "theme": "pizzeria"
 }
 EOF
 
@@ -778,7 +778,7 @@ EOF
     quiet="$(json_get "$settings_file" quietStartup)"
     theme="$(json_get "$settings_file" theme)"
     if [ "$quiet" = "__MISSING__" ]; then pass "quietStartup removed"; else fail "quietStartup should be removed" "got: $quiet"; fi
-    if [ "$theme" = '"retro-pizzeria"' ]; then pass "theme preserved through round trip"; else fail "theme not preserved" "got: $theme"; fi
+    if [ "$theme" = '"pizzeria"' ]; then pass "theme preserved through round trip"; else fail "theme not preserved" "got: $theme"; fi
 
     destroy_env
 }

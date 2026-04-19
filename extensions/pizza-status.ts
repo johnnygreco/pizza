@@ -7,7 +7,7 @@
 import type { ExtensionAPI, ExtensionContext, ReadonlyFooterDataProvider } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { formatModelLabel } from "./shared/model-label.ts";
-import { ANSI_BOLD, ANSI_RESET, getPizzaTheme, onPizzaThemeChange } from "./shared/pizza-theme.ts";
+import { ANSI_BOLD, ANSI_RESET, getPizzaTheme, onPizzaThemeChange } from "./shared/pizza-palette.ts";
 
 const STATUS_KEY = "pizza.status";
 const METER_WIDTH = 20;
@@ -258,13 +258,19 @@ function updateStatus(ctx: ExtensionContext): void {
 	ctx.ui.setStatus(STATUS_KEY, buildStatusLine(display, percent, model));
 }
 
+// The status line is a cached ANSI string in pi's state, so flipping the
+// pizza theme doesn't recolor it until we call setStatus again. Register once
+// at module load; session_start points the listener at the latest ctx.
+let latestCtxForStatus: ExtensionContext | undefined;
+onPizzaThemeChange(() => {
+	if (latestCtxForStatus) updateStatus(latestCtxForStatus);
+});
+
 export default function pizzaStatusExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
+		latestCtxForStatus = ctx;
 		installFooter(ctx);
 		updateStatus(ctx);
-		// The status line is a cached ANSI string in pi's state, so flipping
-		// the pizza theme doesn't recolor it until we call setStatus again.
-		onPizzaThemeChange(() => updateStatus(ctx));
 	});
 
 	pi.on("turn_start", async (_event, ctx) => {

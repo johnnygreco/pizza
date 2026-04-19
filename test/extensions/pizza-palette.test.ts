@@ -13,9 +13,9 @@ import {
   onPizzaThemeChange,
   registerPizzaThemePath,
   setActivePizzaTheme,
-} from "../../extensions/shared/pizza-theme.ts";
+} from "../../extensions/shared/pizza-palette.ts";
 
-describe("pizza-theme registry", () => {
+describe("pizza-palette registry", () => {
   beforeEach(() => {
     setActivePizzaTheme(DEFAULT_PIZZA_THEME);
   });
@@ -24,36 +24,39 @@ describe("pizza-theme registry", () => {
     setActivePizzaTheme(DEFAULT_PIZZA_THEME);
   });
 
-  it("ships retro-pizzeria as the default theme", () => {
-    expect(DEFAULT_PIZZA_THEME).toBe("retro-pizzeria");
-    expect(listPizzaThemes()).toContain("retro-pizzeria");
+  it("ships pizzeria as the default theme", () => {
+    expect(DEFAULT_PIZZA_THEME).toBe("pizzeria");
+    expect(listPizzaThemes()).toContain("pizzeria");
   });
 
-  it("ships cyberpunk-pizzeria as a second theme", () => {
-    expect(listPizzaThemes()).toContain("cyberpunk-pizzeria");
+  it("bundles dracula, tokyo-night, synthwave, cyberpunk, and nord", () => {
+    const all = listPizzaThemes();
+    for (const name of ["dracula", "tokyo-night", "synthwave", "cyberpunk", "nord"]) {
+      expect(all).toContain(name);
+    }
   });
 
   it("returns the active theme when name is omitted", () => {
-    expect(getPizzaTheme().name).toBe("retro-pizzeria");
-    expect(getActivePizzaThemeName()).toBe("retro-pizzeria");
+    expect(getPizzaTheme().name).toBe("pizzeria");
+    expect(getActivePizzaThemeName()).toBe("pizzeria");
   });
 
   it("falls back to the default for unregistered getPizzaTheme lookups", () => {
-    expect(getPizzaTheme("does-not-exist").name).toBe("retro-pizzeria");
+    expect(getPizzaTheme("does-not-exist").name).toBe("pizzeria");
   });
 
   it("setActivePizzaTheme is a no-op when the name isn't registered", () => {
-    expect(setActivePizzaTheme("does-not-exist")).toBe("retro-pizzeria");
-    expect(getActivePizzaThemeName()).toBe("retro-pizzeria");
+    expect(setActivePizzaTheme("does-not-exist")).toBe("pizzeria");
+    expect(getActivePizzaThemeName()).toBe("pizzeria");
   });
 
-  it("activates cyberpunk-pizzeria when requested", () => {
-    expect(setActivePizzaTheme("cyberpunk-pizzeria")).toBe("cyberpunk-pizzeria");
-    expect(getPizzaTheme().name).toBe("cyberpunk-pizzeria");
+  it("activates dracula when requested", () => {
+    expect(setActivePizzaTheme("dracula")).toBe("dracula");
+    expect(getPizzaTheme().name).toBe("dracula");
   });
 
-  it("every PizzaTheme slot is populated for both bundled themes", () => {
-    for (const name of ["retro-pizzeria", "cyberpunk-pizzeria"]) {
+  it("every PizzaTheme slot is populated for every bundled theme", () => {
+    for (const name of listPizzaThemes()) {
       const theme = getPizzaTheme(name);
       for (const [key, value] of Object.entries(theme)) {
         expect(value, `${name}.${key} must be populated`).toBeTruthy();
@@ -62,7 +65,7 @@ describe("pizza-theme registry", () => {
   });
 
   it("hasPizzaTheme reflects the registry", () => {
-    expect(hasPizzaTheme("retro-pizzeria")).toBe(true);
+    expect(hasPizzaTheme("pizzeria")).toBe(true);
     expect(hasPizzaTheme("does-not-exist")).toBe(false);
   });
 });
@@ -195,7 +198,7 @@ describe("onPizzaThemeChange", () => {
     const listener = vi.fn();
     const unsubscribe = onPizzaThemeChange(listener);
 
-    setActivePizzaTheme("cyberpunk-pizzeria");
+    setActivePizzaTheme("dracula");
     expect(listener).toHaveBeenCalledTimes(1);
 
     unsubscribe();
@@ -217,7 +220,7 @@ describe("onPizzaThemeChange", () => {
     const unsubscribe = onPizzaThemeChange(listener);
     unsubscribe();
 
-    setActivePizzaTheme("cyberpunk-pizzeria");
+    setActivePizzaTheme("dracula");
     expect(listener).not.toHaveBeenCalled();
   });
 });
@@ -226,16 +229,16 @@ describe("shared state across module instances", () => {
   // Pi loads each extension through its own `jiti` instance with
   // `moduleCache: false`, so module-local state (registry, active theme,
   // listeners) is not shared between extensions unless we explicitly route it
-  // through `globalThis`. This test simulates that by loading pizza-theme
+  // through `globalThis`. This test simulates that by loading pizza-palette
   // twice with no caching and verifying the two copies share state.
 
   const modulePath = resolve(
     fileURLToPath(new URL(".", import.meta.url)),
-    "../../extensions/shared/pizza-theme.ts",
+    "../../extensions/shared/pizza-palette.ts",
   );
 
   async function freshLoad(): Promise<
-    typeof import("../../extensions/shared/pizza-theme.ts")
+    typeof import("../../extensions/shared/pizza-palette.ts")
   > {
     const jiti = createJiti(import.meta.url, { moduleCache: false });
     return await jiti.import(modulePath);
@@ -259,13 +262,13 @@ describe("shared state across module instances", () => {
     const bListener = vi.fn();
     const unsubscribe = modB.onPizzaThemeChange(bListener);
 
-    modA.setActivePizzaTheme("cyberpunk-pizzeria");
+    modA.setActivePizzaTheme("dracula");
 
     // Subscriber in module B fires when module A flips the theme.
     expect(bListener).toHaveBeenCalledTimes(1);
     // Both modules observe the new active theme.
-    expect(modA.getActivePizzaThemeName()).toBe("cyberpunk-pizzeria");
-    expect(modB.getActivePizzaThemeName()).toBe("cyberpunk-pizzeria");
+    expect(modA.getActivePizzaThemeName()).toBe("dracula");
+    expect(modB.getActivePizzaThemeName()).toBe("dracula");
     // And both resolve the same palette for the active theme.
     expect(modA.getPizzaTheme().crust).toBe(modB.getPizzaTheme().crust);
 

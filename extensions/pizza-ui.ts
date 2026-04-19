@@ -11,14 +11,11 @@ import { formatModelLabel } from "./shared/model-label.ts";
 import {
   ANSI_BG_OFF,
   ANSI_RESET,
-  DEFAULT_PIZZA_THEME,
   getActivePizzaThemeName,
   getPizzaTheme,
-  hasPizzaTheme,
-  listPizzaThemes,
-  registerPizzaThemePath,
-  setActivePizzaTheme,
-} from "./shared/pizza-theme.ts";
+  onPizzaThemeChange,
+  syncActivePalette,
+} from "./shared/pizza-palette.ts";
 
 const VERSION = PIZZA_VERSION;
 
@@ -109,6 +106,15 @@ type HeaderState = {
 };
 
 const HEADER_STATES = new WeakMap<object, HeaderState>();
+
+// The cycler flips Pi's theme mid-turn; turn_end won't fire until the next
+// LLM response, so rebuild the cached banner as soon as the palette changes.
+// Register once at module load; session_start points the listener at the
+// latest ctx.
+let latestCtxForHeader: any | undefined;
+onPizzaThemeChange(() => {
+  if (latestCtxForHeader) setOrUpdateHeader(latestCtxForHeader);
+});
 
 // ── Resources (skills / prompts / extensions / themes) ──────
 // Collected once per header rebuild and passed into buildBanner so the pinned
@@ -635,34 +641,6 @@ class PizzaHeader {
   }
 }
 
-/**
- * Mirror the active Pi theme into Pizza. Pi is the single source of truth —
- * `/pizza theme X` and Pi's own `/theme X` both land in `ctx.ui.theme.name`,
- * and this function brings Pizza in line with it. If Pi's theme has a
- * registered Pizza palette (bundled or discovered via `getAllThemes`), use it;
- * otherwise, derive from Pi's colors via FALLBACK_FROM_PI_COLOR in
- * pizza-theme.ts by registering whatever JSON path Pi exposes.
- */
-function syncPizzaThemeFromPi(ctx: any): boolean {
-  const piThemeName: string | undefined = ctx?.ui?.theme?.name;
-
-  // Opportunistically register any theme path Pi knows about so pizza can
-  // follow custom/user themes, not just the two we bundle.
-  const allThemes: Array<{ name: string; path?: string }> =
-    ctx?.ui?.getAllThemes?.() ?? [];
-  for (const { name, path } of allThemes) {
-    if (path && !hasPizzaTheme(name)) {
-      registerPizzaThemePath(name, path);
-    }
-  }
-
-  const target =
-    piThemeName && hasPizzaTheme(piThemeName) ? piThemeName : DEFAULT_PIZZA_THEME;
-  if (target === getActivePizzaThemeName()) return false;
-  setActivePizzaTheme(target);
-  return true;
-}
-
 function setOrUpdateHeader(ctx: any, reason?: string): void {
   if (!ctx?.hasUI) return;
 
@@ -691,17 +669,19 @@ function setOrUpdateHeader(ctx: any, reason?: string): void {
 // ── Extension entry point ────────────────────────────────────
 export default function pizzaUiExtension(pi: ExtensionAPI): void {
   piApi = pi;
+
   pi.on("session_start", async (event, ctx) => {
     maybeWarnAboutPiCompatibility(ctx, PI_VERSION);
     if (!ctx.hasUI) return;
 
-    syncPizzaThemeFromPi(ctx);
+    latestCtxForHeader = ctx;
+    syncActivePalette(ctx);
     ctx.ui.setTitle(`pizza \u00B7 ${basename(ctx.cwd)}`);
     setOrUpdateHeader(ctx, event?.reason);
   });
 
   pi.on("turn_end", async (_event, ctx) => {
-    if (syncPizzaThemeFromPi(ctx)) {
+    if (syncActivePalette(ctx)) {
       const state = HEADER_STATES.get(ctx.sessionManager as object);
       state?.header.invalidate();
     }
@@ -714,13 +694,9 @@ export default function pizzaUiExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("pizza", {
     description:
-      "Show Pizza status, or run `theme` / `resources` for theme & banner resources",
+      "Show Pizza status, or run `resources` to expand/collapse the resources section",
     handler: async (args, ctx) => {
       const tokens = (args ?? "").trim().split(/\s+/).filter(Boolean);
-      if (tokens[0] === "theme") {
-        await runThemeCommand(tokens.slice(1), ctx);
-        return;
-      }
       if (tokens[0] === "resources") {
         runResourcesCommand(tokens.slice(1), ctx);
         return;
@@ -766,60 +742,3 @@ function runResourcesCommand(tokens: string[], ctx: any): void {
   }
 }
 
-function listAvailableThemes(ctx: any): string[] {
-  const piThemes: Array<{ name: string }> = ctx?.ui?.getAllThemes?.() ?? [];
-  const names = new Set<string>(listPizzaThemes());
-  for (const { name } of piThemes) names.add(name);
-  return Array.from(names).sort();
-}
-
-async function runThemeCommand(tokens: string[], ctx: any): Promise<void> {
-  syncPizzaThemeFromPi(ctx); // ensure any newly-registered themes are known
-  const themes = listAvailableThemes(ctx);
-  const active = ctx?.ui?.theme?.name ?? getActivePizzaThemeName();
-
-  let target: string;
-  if (tokens.length === 0) {
-    if (!ctx?.hasUI || typeof ctx.ui?.select !== "function") {
-      const lines = [
-        "\u{1F355} pizza themes:",
-        ...themes.map((n) => `  ${n === active ? "\u2192" : " "} ${n}`),
-        "",
-        "/pizza theme <name>   switch Pi and Pizza together",
-      ];
-      emit(ctx, lines, "info");
-      return;
-    }
-    const picked = await ctx.ui.select(
-      `\u{1F355} Pick a theme (current: ${active})`,
-      themes,
-    );
-    if (picked === undefined) return; // user cancelled
-    target = picked;
-  } else {
-    target = tokens[0];
-  }
-
-  if (!themes.includes(target)) {
-    emit(
-      ctx,
-      [`Unknown theme: ${target}`, `Available: ${themes.join(", ")}`],
-      "warning",
-    );
-    return;
-  }
-
-  if (target === active) {
-    emit(ctx, [`Theme: ${target} (unchanged)`], "info");
-    return;
-  }
-
-  const result = ctx?.ui?.setTheme?.(target) ?? { success: false, error: "no UI" };
-  if (!result.success) {
-    emit(ctx, [`Failed to apply theme: ${result.error ?? "unknown error"}`], "warning");
-    return;
-  }
-  syncPizzaThemeFromPi(ctx);
-  setOrUpdateHeader(ctx);
-  emit(ctx, [`Theme: ${target}`], "info");
-}
