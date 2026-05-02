@@ -34,9 +34,18 @@ Set `PIZZA_HOME` to change the install directory.
 **`/theme`** — Pick a theme interactively, or `/theme <name|next|prev>` to switch directly. Pizza's palette follows Pi's active theme.
   - `Ctrl+Q` — cycle theme forward
 
+**`/create-subagent <description>`** — Generate a reviewable Pizza subagent draft, then run once, keep for session, save permanently, preview context, or cancel.
+
+**`/subagents`** — Manage subagent definitions, running/recent runs, and the review inbox. Use the `subagent` tool action `activity` with a run id to inspect what a running subagent is currently doing.
+
+**`/remove-subagent <name>`** — Remove a saved or session-scoped subagent. Builtins cannot be deleted.
+
+**`:<agent-name> <prompt>`** — Shortcut syntax to run an existing subagent directly, e.g. `:reviewer review the current diff`. Use `:reviewer` to run with no explicit user prompt.
+  - `:subagents` or `:agents list` — quick list of existing subagents.
+
 ### Extensions
 
-Pizza now ships only its first-party extensions. Add third-party Pi extensions separately as you need them.
+Pizza now ships only its first-party extensions, including `pizza-subagents` for scoped delegation. Add third-party Pi extensions separately as you need them.
 
 ## 🛠️ Development
 
@@ -53,6 +62,7 @@ Test a single extension:
 
 ```bash
 pi -e ./extensions/pizza-ui.ts
+pi -e ./extensions/pizza-subagents
 ```
 
 Test the full package locally:

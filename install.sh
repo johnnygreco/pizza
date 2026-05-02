@@ -186,6 +186,7 @@ main() {
     echo "    - pizza-theme"
     echo "    - pizza-status"
     echo "    - pizza-editor"
+    echo "    - pizza-subagents"
     echo ""
     echo "  Start a new Pi session to use Pizza."
     echo ""
