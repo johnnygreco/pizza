@@ -59,11 +59,11 @@ describe("isPiVersionCompatible", () => {
 
 describe("compatibility messaging", () => {
   it("summarizes compatible Pi versions", () => {
-    expect(getPiCompatibilitySummary("0.72.1")).toBe("v0.72.1 (compatible with 0.67.0+)");
+    expect(getPiCompatibilitySummary("0.72.1")).toBe("v0.72.1 (compatible with 0.72.0+)");
   });
 
   it("summarizes incompatible Pi versions", () => {
-    expect(getPiCompatibilitySummary("0.66.5")).toBe("v0.66.5 (requires 0.67.0+)");
+    expect(getPiCompatibilitySummary("0.66.5")).toBe("v0.66.5 (requires 0.72.0+)");
   });
 
   it("returns no warning for compatible Pi versions", () => {
@@ -71,7 +71,7 @@ describe("compatibility messaging", () => {
   });
 
   it("returns a warning for incompatible Pi versions", () => {
-    expect(getPiCompatibilityWarning("0.66.5")).toContain("requires Pi 0.67.0+");
+    expect(getPiCompatibilityWarning("0.66.5")).toContain("requires Pi 0.72.0+");
     expect(getPiCompatibilityWarning("0.66.5")).toContain("current Pi is v0.66.5");
   });
 });

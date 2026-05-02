@@ -21,7 +21,7 @@
   },
   "pizza": {
     "compatibility": {
-      "pi": ">=0.67.0"
+      "pi": ">=0.72.0"
     }
   },
   "engines": {
@@ -35,7 +35,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@mariozechner/pi-coding-agent": "0.67.0",
+    "@mariozechner/pi-coding-agent": "0.72.1",
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"

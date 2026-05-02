@@ -450,7 +450,7 @@ describe("pizza-ui extension", () => {
     maybeWarnAboutPiCompatibility(ctx as any, "0.66.5");
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("requires Pi 0.67.0+"),
+      expect.stringContaining("requires Pi 0.72.0+"),
       "warning",
     );
   });
@@ -477,7 +477,7 @@ describe("pizza-ui extension", () => {
     const msg = ctx.ui.notify.mock.calls.at(-1)![0] as string;
     expect(msg).toContain(VERSION);
     expect(msg).toContain("Pi:");
-    expect(msg).toContain("compatible with 0.67.0+");
+    expect(msg).toContain("compatible with 0.72.0+");
     expect(msg).toContain("Anthropic: sonnet");
     expect(msg).toContain("/home/user/project");
     expect(msg).toContain("Banner: resources + shortcuts inline");
