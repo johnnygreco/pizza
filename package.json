@@ -10,8 +10,7 @@
   },
   "pi": {
     "extensions": [
-      "extensions",
-      "subagents"
+      "extensions"
     ],
     "skills": [
       "skills"
@@ -22,7 +21,7 @@
   },
   "pizza": {
     "compatibility": {
-      "pi": "~0.67.0"
+      "pi": ">=0.67.0"
     }
   },
   "engines": {

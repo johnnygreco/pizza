@@ -4,9 +4,7 @@ set -euo pipefail
 main() {
     # ── Constants ────────────────────────────────────────────────────────
     REPO="johnnygreco/pizza"
-    SUBAGENTS_REPO="nicobailon/pi-subagents"
-    SUBAGENTS_COMMIT="9d1e88b2d9e48bc59503814fd443850341f74907"
-    DEFAULT_PI_COMPATIBILITY_RANGE="~0.67.0"
+    DEFAULT_PI_COMPATIBILITY_RANGE=">=0.67.0"
     DEFAULT_INSTALL_DIR="$HOME/.pizza"
 
     # ── Color helpers (tty-aware) ────────────────────────────────────────
@@ -152,7 +150,7 @@ main() {
     # ── Install core extensions ──────────────────────────────────────────
     mkdir -p "$INSTALL_DIR"
 
-    rm -rf "$INSTALL_DIR/extensions" "$INSTALL_DIR/skills" "$INSTALL_DIR/prompts" "$INSTALL_DIR/agents"
+    rm -rf "$INSTALL_DIR/extensions" "$INSTALL_DIR/skills" "$INSTALL_DIR/prompts" "$INSTALL_DIR/agents" "$INSTALL_DIR/subagents"
     cp -R "$EXTRACTED/extensions" "$INSTALL_DIR/extensions"
     cp -R "$EXTRACTED/skills" "$INSTALL_DIR/skills"
     cp -R "$EXTRACTED/prompts" "$INSTALL_DIR/prompts"
@@ -160,20 +158,6 @@ main() {
     [ -f "$EXTRACTED/LICENSE" ] && cp "$EXTRACTED/LICENSE" "$INSTALL_DIR/LICENSE"
 
     success "Core extensions installed"
-
-    # ── Install subagents ────────────────────────────────────────────────
-    info "Installing subagents extension"
-    SUBAGENTS_URL="https://github.com/${SUBAGENTS_REPO}/archive/${SUBAGENTS_COMMIT}.tar.gz"
-
-    if ! curl -fsSL "$SUBAGENTS_URL" 2>"$TMP_DIR/dl.log" | tar -xz -C "$TMP_DIR" 2>>"$TMP_DIR/dl.log"; then
-        error "Failed to download subagents extension"
-        [ -s "$TMP_DIR/dl.log" ] && cat "$TMP_DIR/dl.log" >&2
-        exit 1
-    fi
-
-    rm -rf "$INSTALL_DIR/subagents"
-    cp -R "$TMP_DIR/pi-subagents-${SUBAGENTS_COMMIT}" "$INSTALL_DIR/subagents"
-    success "Subagents extension installed"
 
     # ── Symlink agent definitions into ~/.agents/ ────────────────────────
     link_agents
@@ -200,10 +184,8 @@ main() {
     echo "  Extensions:"
     echo "    - pizza-ui"
     echo "    - pizza-theme"
-    echo "    - context"
-    echo "    - todos"
-    echo "    - control"
-    echo "    - subagents (/run, /parallel)"
+    echo "    - pizza-status"
+    echo "    - pizza-editor"
     echo ""
     echo "  Start a new Pi session to use Pizza."
     echo ""
@@ -550,6 +532,11 @@ if (match) process.stdout.write(match[1]);
 describe_pi_range() {
     node -e '
 const range = (process.argv[1] ?? "").trim();
+const minimum = range.match(/^>=\s*v?(\d+)\.(\d+)\.(\d+)$/);
+if (minimum) {
+  process.stdout.write(`${minimum[1]}.${minimum[2]}.${minimum[3]}+`);
+  process.exit(0);
+}
 const match = range.match(/^~\s*v?(\d+)\.(\d+)\.(\d+)$/);
 process.stdout.write(match ? `${match[1]}.${match[2]}.x` : range);
 ' "$1"
@@ -574,7 +561,7 @@ const dep =
 if (typeof dep === "string") {
   const match = dep.match(/(?:^|[^0-9])v?(\d+)\.(\d+)(?:\.(\d+))?(?!\d)/);
   if (match) {
-    process.stdout.write(`~${match[1]}.${match[2]}.0`);
+    process.stdout.write(`>=${match[1]}.${match[2]}.0`);
   }
 }
 ' "$package_json" 2>/dev/null || true)"
@@ -609,6 +596,19 @@ const version = parseSemver(process.argv[1]);
 const range = String(process.argv[2] ?? "").trim();
 if (!version) process.exit(1);
 
+const minimum = range.match(/^>=\s*v?(\d+)\.(\d+)\.(\d+)$/);
+if (minimum) {
+  process.exit(
+    compare(version, {
+      major: Number(minimum[1]),
+      minor: Number(minimum[2]),
+      patch: Number(minimum[3]),
+    }) >= 0
+      ? 0
+      : 1
+  );
+}
+
 const tilde = range.match(/^~\s*v?(\d+)\.(\d+)\.(\d+)$/);
 if (tilde) {
   const minimum = {
@@ -633,7 +633,7 @@ process.exit(exact && compare(version, exact) === 0 ? 0 : 1);
 check_pi() {
     local required_pi_range="$1"
     local required_pi_label detected_pi_label raw_pi_version normalized_pi_version
-    local pi_install_cmd="npm install -g @mariozechner/pi-coding-agent@${required_pi_range}"
+    local pi_install_cmd="npm install -g \"@mariozechner/pi-coding-agent@${required_pi_range}\""
 
     required_pi_label="$(describe_pi_range "$required_pi_range")"
 
@@ -738,7 +738,7 @@ generate_package_json() {
     }
   },
   "pi": {
-    "extensions": ["extensions", "subagents"],
+    "extensions": ["extensions"],
     "skills": ["skills"],
     "prompts": ["prompts"]
   }

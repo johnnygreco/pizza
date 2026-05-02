@@ -298,7 +298,7 @@ registerBundled();
 /**
  * Register a theme file at an arbitrary path. Called from `syncActivePalette`
  * so Pizza can follow every theme Pi knows about — bundled, user, or custom —
- * whenever `/theme` (or Ctrl+X/Ctrl+Q) flips Pi.
+ * whenever `/theme` (or Ctrl+Q) flips Pi.
  */
 export function registerPizzaThemePath(name: string, path: string): PizzaTheme | null {
   try {

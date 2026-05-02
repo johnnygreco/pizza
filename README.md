@@ -9,8 +9,8 @@ curl -fsSL https://raw.githubusercontent.com/johnnygreco/pizza/main/install.sh |
 ```
 
 Requires Node.js >= 20.6 and Pi. Installs to `~/.pizza`.
-Each Pizza release declares the Pi range it supports. The installer enforces that
-range, and Pizza warns at session start if Pi is later upgraded past it.
+Each Pizza release declares the minimum Pi version it supports. The installer
+enforces that floor, and Pizza warns at session start only when Pi is older than it.
 
 ```bash
 # Pin a specific version
@@ -26,37 +26,22 @@ Set `PIZZA_HOME` to change the install directory.
 
 ### Commands
 
-**`/context`** — See context window usage, loaded skills, and session cost.
-
-**`/todos`** — File-based task management with distributed locking. Interactive TUI for creating, searching, and claiming tasks across sessions.
-
-**`--session-control`** — Inter-session messaging via Unix sockets.
-
-```bash
-pi --session-control
-pi --control-session mybot --send-session-message "status update?"
-```
-
-**`/run`**, **`/parallel`** — Subagent delegation with async support and parallel execution.
-
 **`/pizza`** — Pizza version, Pi compatibility, model, cwd, active theme, banner layout, and context at a glance.
   - `/pizza resources` — print the resources section using the same formatting as the banner.
   - `/pizza shortcuts` — print the shortcuts + prefixes section using the same formatting as the banner.
   - `/pizza help` — show quick usage.
 
-**`/theme`** — Pick a theme interactively, or `/theme <name>` to switch directly. Pizza's palette follows Pi's active theme.
-  - `Ctrl+X` — cycle theme forward
-  - `Ctrl+Q` — cycle theme backward
+**`/theme`** — Pick a theme interactively, or `/theme <name|next|prev>` to switch directly. Pizza's palette follows Pi's active theme.
+  - `Ctrl+Q` — cycle theme forward
 
-### Credits
+### Extensions
 
-`/context`, `/todos`, and `--session-control` are from [mitsuhiko/agent-stuff](https://github.com/mitsuhiko/agent-stuff). Subagents are from [nicobailon/pi-subagents](https://github.com/nicobailon/pi-subagents).
+Pizza now ships only its first-party extensions. Add third-party Pi extensions separately as you need them.
 
 ## 🛠️ Development
 
 ```bash
 npm install          # dev deps (includes pi-coding-agent for types)
-make setup           # clone vendored subagents/ for local iteration (optional)
 
 npm run typecheck
 npm test             # vitest

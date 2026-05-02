@@ -1,20 +1,8 @@
-.PHONY: help setup test test-install test-all typecheck release
-
-SUBAGENTS_REPO = https://github.com/nicobailon/pi-subagents.git
-SUBAGENTS_COMMIT = 9d1e88b2d9e48bc59503814fd443850341f74907
+.PHONY: help test test-install test-all typecheck release
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
-
-setup: ## Clone subagents extension for local development
-	@if [ -d subagents ]; then \
-		echo "subagents/ already exists. To update: rm -rf subagents && make setup"; \
-	else \
-		git clone $(SUBAGENTS_REPO) subagents; \
-		git -C subagents checkout $(SUBAGENTS_COMMIT); \
-		echo "Subagents extension cloned to subagents/"; \
-	fi
 
 test: ## Run unit tests (vitest)
 	npm test

@@ -5,7 +5,7 @@
 Pizza is a curated collection of extensions for [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent), a flexible coding agent. Pi ships as a minimal core with a first-class extension API; Pizza uses that API to turn Pi into a more opinionated, batteries-included coding agent ("Pi with extra toppings").
 
 - Pi is the host. Pizza never forks or patches Pi — it only registers extensions, skills, prompts, agent definitions, and themes through Pi's public interfaces.
-- Pizza bundles third-party extensions (`subagents` from `nicobailon/pi-subagents`, commands adapted from `mitsuhiko/agent-stuff`) alongside first-party ones. The distribution is the product.
+- Pizza ships only first-party extensions. Third-party Pi extensions should be installed separately as users need them.
 - Pi compatibility is a hard constraint. `package.json` → `pizza.compatibility.pi` declares the supported range; runtime checks warn if Pi drifts outside it. Keep it honest when APIs change.
 
 ## How users consume Pizza
@@ -16,7 +16,7 @@ Users don't clone the repo. They run `install.sh` against a GitHub release tarba
 curl -fsSL https://raw.githubusercontent.com/johnnygreco/pizza/main/install.sh | bash
 ```
 
-The installer downloads a release to `$PIZZA_HOME` (default `~/.pizza`), pulls in vendored third-party extensions at pinned revisions, wires everything into Pi's expected locations, and registers the package with `pi install`. `--uninstall` reverses all of it.
+The installer downloads a release to `$PIZZA_HOME` (default `~/.pizza`), wires Pizza's first-party extensions into Pi's expected locations, and registers the package with `pi install`. `--uninstall` reverses all of it.
 
 What this means during development:
 
@@ -24,7 +24,6 @@ What this means during development:
 - **Only what ships in the release tarball reaches users.** `.github/workflows/release.yml` defines what gets bundled; everything else (`test/`, `Makefile`, configs, `node_modules/`) is development-only. Adding a new top-level directory that users need means updating that workflow.
 - **Registration wiring lives in `package.json` → `pi.extensions` / `pi.skills` / `pi.prompts`.** Agents are wired up separately via symlinks in `install.sh`.
 - **Extensions are `.ts` loaded by Pi's jiti runtime — no build step.** Edit and run.
-- **Vendored extensions (e.g. `subagents/`) are fetched at install time, not committed.** Use `make setup` to pull them locally when you need them.
 
 ## Development workflow
 
@@ -32,7 +31,6 @@ Setup:
 
 ```bash
 npm install        # dev deps, including pi-coding-agent for types
-make setup         # clone pinned subagents/ for local iteration (optional)
 ```
 
 Iterate:

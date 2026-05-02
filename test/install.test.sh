@@ -25,7 +25,6 @@ fail() {
 
 REAL_CURL="$(command -v curl)"
 REAL_NODE="$(command -v node)"
-SUBAGENTS_COMMIT="$(grep 'SUBAGENTS_COMMIT=' "$INSTALL_SCRIPT" | head -1 | sed 's/.*"\(.*\)"/\1/')"
 TEST_DIR=""
 
 # Create an isolated environment for a single test. Sets TEST_DIR and
@@ -59,11 +58,11 @@ M
   "version": "0.99.0",
   "pizza": {
     "compatibility": {
-      "pi": "~0.67.0"
+      "pi": ">=0.67.0"
     }
   },
   "pi": {
-    "extensions": ["extensions", "subagents"],
+    "extensions": ["extensions"],
     "skills": ["skills"],
     "prompts": ["prompts"]
   },
@@ -82,21 +81,9 @@ AGENT
     echo 'Apache 2.0' > "$pkg/LICENSE"
     tar -czf "$TEST_DIR/pizza.tar.gz" -C "$TEST_DIR/fixture" .
 
-    # ── Subagents tarball fixture ─────────────────────────────────���─
-    local sa="$TEST_DIR/sa_fixture/pi-subagents-${SUBAGENTS_COMMIT}"
-    mkdir -p "$sa"
-    echo '{}' > "$sa/package.json"
-    tar -czf "$TEST_DIR/subagents.tar.gz" -C "$TEST_DIR/sa_fixture" .
-
-    # ── Mock curl: serve local fixtures, delegate the rest ──────────
+    # ── Mock curl: delegate to the real curl ────────────────────────
     cat > "$TEST_DIR/bin/curl" << MOCK
 #!/usr/bin/env bash
-for arg in "\$@"; do
-    if [[ "\$arg" == *"pi-subagents"* ]]; then
-        cat "$TEST_DIR/subagents.tar.gz"
-        exit 0
-    fi
-done
 exec "$REAL_CURL" "\$@"
 MOCK
     chmod +x "$TEST_DIR/bin/curl"
@@ -242,7 +229,7 @@ test_no_pi_exits_with_error() {
 test_incompatible_pi_nontty_exits() {
     echo "Incompatible Pi (non-TTY) → hard error"
     create_env
-    mock_pi "0.68.0"
+    mock_pi "0.66.0"
 
     local out rc=0
     out="$(run_installer --version 0.99.0)" || rc=$?
@@ -292,8 +279,23 @@ PKG
     out="$(run_installer --version 0.99.0)" || rc=$?
 
     assert_exits_nonzero "exits non-zero" "$rc"
-    assert_output_contains "shows inferred range" "$out" "requires 0.67.x"
+    assert_output_contains "shows inferred range" "$out" "requires 0.67.0+"
     assert_dir_missing "nothing installed" "$TEST_DIR/target/extensions"
+
+    destroy_env
+}
+
+test_newer_pi_is_accepted() {
+    echo "Newer Pi release is accepted"
+    create_env
+    mock_pi "0.72.1"
+
+    local out rc=0
+    out="$(run_installer --version 0.99.0)" || rc=$?
+
+    assert_exits_zero "exits zero" "$rc"
+    assert_output_contains "shows detected Pi version" "$out" "Pi v0.72.1"
+    assert_dir_exists "extensions/ installed" "$TEST_DIR/target/extensions"
 
     destroy_env
 }
@@ -349,7 +351,7 @@ test_successful_install() {
     assert_dir_exists "skills/ installed" "$TEST_DIR/target/skills"
     assert_dir_exists "prompts/ installed" "$TEST_DIR/target/prompts"
     assert_dir_exists "agents/ installed" "$TEST_DIR/target/agents"
-    assert_dir_exists "subagents/ installed" "$TEST_DIR/target/subagents"
+    assert_dir_missing "legacy subagents/ removed" "$TEST_DIR/target/subagents"
     assert_file_exists "LICENSE copied" "$TEST_DIR/target/LICENSE"
 
     # Agent symlinks
@@ -372,7 +374,7 @@ test_successful_install() {
 }
 
 test_package_json_generated() {
-    echo "package.json has correct version and includes subagents"
+    echo "package.json has correct version and only first-party extensions"
     create_env
     mock_pi "0.67.1"
 
@@ -381,8 +383,8 @@ test_package_json_generated() {
     assert_file_exists "package.json exists" "$TEST_DIR/target/package.json"
     assert_file_contains "version is 0.99.0" "$TEST_DIR/target/package.json" '"version": "0.99.0"'
     assert_file_contains "extensions field present" "$TEST_DIR/target/package.json" '"extensions"'
-    assert_file_contains "subagents included" "$TEST_DIR/target/package.json" '"subagents"'
-    assert_file_contains "pi compatibility is preserved" "$TEST_DIR/target/package.json" '"pi": "~0.67.0"'
+    assert_file_not_contains "subagents omitted" "$TEST_DIR/target/package.json" '"subagents"'
+    assert_file_contains "pi compatibility is preserved" "$TEST_DIR/target/package.json" '"pi": ">=0.67.0"'
 
     destroy_env
 }
@@ -521,32 +523,6 @@ test_corrupt_tarball_exits() {
 
     assert_exits_nonzero "exits non-zero" "$rc"
     assert_output_contains "says extensions missing" "$out" "does not contain extensions"
-
-    destroy_env
-}
-
-test_subagents_download_failure_exits() {
-    echo "Failed subagents download → hard error"
-    create_env
-    mock_pi "0.67.1"
-
-    # Override curl mock to fail on subagents URL
-    cat > "$TEST_DIR/bin/curl" << MOCK
-#!/usr/bin/env bash
-for arg in "\$@"; do
-    if [[ "\$arg" == *"pi-subagents"* ]]; then
-        exit 1
-    fi
-done
-exec "$REAL_CURL" "\$@"
-MOCK
-    chmod +x "$TEST_DIR/bin/curl"
-
-    local out rc=0
-    out="$(run_installer --version 0.99.0)" || rc=$?
-
-    assert_exits_nonzero "exits non-zero" "$rc"
-    assert_output_contains "shows subagents error" "$out" "Failed to download subagents"
 
     destroy_env
 }
@@ -956,10 +932,6 @@ for arg in "\$@"; do
     if [[ "\$arg" == *"api.github.com"* ]]; then
         exit 1
     fi
-    if [[ "\$arg" == *"pi-subagents"* ]]; then
-        cat "$TEST_DIR/subagents.tar.gz"
-        exit 0
-    fi
 done
 exec "$REAL_CURL" "\$@"
 MOCK
@@ -1041,6 +1013,8 @@ main() {
     test_incompatible_pi_no_npm_exits
     echo ""
     test_incompatible_pi_uses_dependency_fallback_when_metadata_missing
+    echo ""
+    test_newer_pi_is_accepted
 
     echo ""
     echo "--- Node.js ---"
@@ -1067,8 +1041,6 @@ main() {
     test_bad_tarball_url_exits
     echo ""
     test_corrupt_tarball_exits
-    echo ""
-    test_subagents_download_failure_exits
 
     echo ""
     echo "--- CLI arguments ---"

@@ -34,7 +34,7 @@ export function derivePiRangeFromDependency(spec: string | undefined): string | 
   if (!spec) return null;
   const version = parseSemver(spec);
   if (!version) return null;
-  return `~${version.major}.${version.minor}.0`;
+  return `>=${version.major}.${version.minor}.0`;
 }
 
 function compareSemver(a: Semver, b: Semver): number {
@@ -49,9 +49,12 @@ export const SUPPORTED_PI_RANGE: string =
     pkg.devDependencies?.["@mariozechner/pi-coding-agent"] ??
       pkg.dependencies?.["@mariozechner/pi-coding-agent"],
   ) ??
-  "~0.67.0";
+  ">=0.67.0";
 
 export function describePiRange(range: string): string {
+  const minimum = range.trim().match(/^>=\s*v?(\d+)\.(\d+)\.(\d+)$/);
+  if (minimum) return `${minimum[1]}.${minimum[2]}.${minimum[3]}+`;
+
   const tilde = range.trim().match(/^~\s*v?(\d+)\.(\d+)\.(\d+)$/);
   if (tilde) return `${tilde[1]}.${tilde[2]}.x`;
   return range.trim();
@@ -63,6 +66,17 @@ export function isPiVersionCompatible(
 ): boolean {
   const current = parseSemver(currentVersion);
   if (!current) return false;
+
+  const minimum = supportedRange.trim().match(/^>=\s*v?(\d+)\.(\d+)\.(\d+)$/);
+  if (minimum) {
+    return (
+      compareSemver(current, {
+        major: Number(minimum[1]),
+        minor: Number(minimum[2]),
+        patch: Number(minimum[3]),
+      }) >= 0
+    );
+  }
 
   const tilde = supportedRange.trim().match(/^~\s*v?(\d+)\.(\d+)\.(\d+)$/);
   if (tilde) {
@@ -92,7 +106,7 @@ export function getPiCompatibilitySummary(currentVersion: string): string {
     return `${currentLabel} (compatible with ${supportedLabel})`;
   }
 
-  return `${currentLabel} (expected ${supportedLabel})`;
+  return `${currentLabel} (requires ${supportedLabel})`;
 }
 
 export function getPiCompatibilityWarning(currentVersion: string): string | null {
@@ -103,8 +117,8 @@ export function getPiCompatibilityWarning(currentVersion: string): string | null
   const supportedLabel = describePiRange(SUPPORTED_PI_RANGE);
 
   return [
-    `Pizza v${PIZZA_VERSION} expects Pi ${supportedLabel}, but current Pi is ${currentLabel}.`,
+    `Pizza v${PIZZA_VERSION} requires Pi ${supportedLabel}, but current Pi is ${currentLabel}.`,
     "Some Pizza extensions may fail to load or behave correctly.",
-    "Update Pizza or switch Pi to a compatible version.",
+    "Update Pi or switch Pizza to a compatible version.",
   ].join("\n");
 }

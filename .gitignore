@@ -1,5 +1,4 @@
 node_modules/
-subagents/
 coverage/
 *.tsbuildinfo
 .DS_Store

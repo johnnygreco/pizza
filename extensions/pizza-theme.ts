@@ -7,6 +7,7 @@ import { syncActivePalette } from "./shared/pizza-palette.ts";
 const STATUS_KEY = "pizza.theme";
 const SWATCH_KEY = "pizza.theme.swatch";
 const SWATCH_TTL_MS = 3000;
+const CYCLE_THEME_SHORTCUT = "ctrl+q";
 
 function currentThemeName(ctx: ExtensionContext): string {
   return ctx.ui.theme.name!;
@@ -95,18 +96,13 @@ export default function pizzaThemeExtension(pi: ExtensionAPI): void {
     applyAndAnnounce(ctx, target.name, `${target.name} (${index + 1}/${themes.length})`);
   }
 
-  pi.registerShortcut("ctrl+x", {
-    description: "Cycle theme forward",
+  pi.registerShortcut(CYCLE_THEME_SHORTCUT, {
+    description: "Cycle theme",
     handler: async (ctx) => cycleTheme(ctx, 1),
   });
 
-  pi.registerShortcut("ctrl+q", {
-    description: "Cycle theme backward",
-    handler: async (ctx) => cycleTheme(ctx, -1),
-  });
-
   pi.registerCommand("theme", {
-    description: "Pick a theme, or /theme <name> to switch directly",
+    description: "Pick a theme, or /theme <name|next|prev> to switch directly",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return;
 
@@ -115,14 +111,22 @@ export default function pizzaThemeExtension(pi: ExtensionAPI): void {
 
       if (arg) {
         const match = themes.find((t) => t.name === arg);
-        if (!match) {
-          ctx.ui.notify(
-            `Unknown theme: ${arg}. Available: ${themes.map((t) => t.name).join(", ")}`,
-            "warning",
-          );
+        if (match) {
+          applyAndAnnounce(ctx, match.name, `Theme: ${match.name}`);
           return;
         }
-        applyAndAnnounce(ctx, match.name, `Theme: ${match.name}`);
+        if (arg === "next") {
+          cycleTheme(ctx, 1);
+          return;
+        }
+        if (arg === "prev") {
+          cycleTheme(ctx, -1);
+          return;
+        }
+        ctx.ui.notify(
+          `Unknown theme: ${arg}. Use /theme, /theme next, /theme prev, or one of: ${themes.map((t) => t.name).join(", ")}`,
+          "warning",
+        );
         return;
       }
 

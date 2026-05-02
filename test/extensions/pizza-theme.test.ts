@@ -65,11 +65,10 @@ function createMockContext(
 }
 
 describe("pizza-theme cycler — registration", () => {
-  it("registers ctrl+x, ctrl+q, /theme, and session_start", () => {
+  it("registers ctrl+q, /theme, and session_start", () => {
     const { api, registeredEvents, registeredCommands, registeredShortcuts } = createMockApi();
     pizzaThemeExtension(api as any);
 
-    expect(registeredShortcuts.has("ctrl+x")).toBe(true);
     expect(registeredShortcuts.has("ctrl+q")).toBe(true);
     expect(registeredCommands.has("theme")).toBe(true);
     expect(registeredEvents.has("session_start")).toBe(true);
@@ -86,12 +85,12 @@ describe("pizza-theme cycler — shortcuts", () => {
     vi.useRealTimers();
   });
 
-  it("ctrl+x cycles forward and updates Pi, status, and swatch", async () => {
+  it("ctrl+q cycles forward and updates Pi, status, and swatch", async () => {
     const { api, registeredShortcuts } = createMockApi();
     pizzaThemeExtension(api as any);
 
     const ctx = createMockContext({ active: "pizzeria" });
-    await registeredShortcuts.get("ctrl+x").handler(ctx);
+    await registeredShortcuts.get("ctrl+q").handler(ctx);
 
     expect(ctx.ui.setTheme).toHaveBeenCalledWith("dracula");
     expect(ctx.ui.setStatus).toHaveBeenCalledWith("pizza.theme", expect.stringContaining("dracula"));
@@ -103,17 +102,6 @@ describe("pizza-theme cycler — shortcuts", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("dracula (2/2)", "info");
   });
 
-  it("ctrl+q cycles backward wrapping around", async () => {
-    const { api, registeredShortcuts } = createMockApi();
-    pizzaThemeExtension(api as any);
-
-    const ctx = createMockContext({ active: "pizzeria" });
-    await registeredShortcuts.get("ctrl+q").handler(ctx);
-
-    expect(ctx.ui.setTheme).toHaveBeenCalledWith("dracula");
-    expect(ctx.ui.notify).toHaveBeenCalledWith("dracula (2/2)", "info");
-  });
-
   it("syncs the pizza palette to the newly-activated theme", async () => {
     const { api, registeredShortcuts } = createMockApi();
     pizzaThemeExtension(api as any);
@@ -121,7 +109,7 @@ describe("pizza-theme cycler — shortcuts", () => {
     const ctx = createMockContext({ active: "pizzeria" });
     expect(getActivePizzaThemeName()).toBe("pizzeria");
 
-    await registeredShortcuts.get("ctrl+x").handler(ctx);
+    await registeredShortcuts.get("ctrl+q").handler(ctx);
     expect(getActivePizzaThemeName()).toBe("dracula");
   });
 
@@ -130,7 +118,7 @@ describe("pizza-theme cycler — shortcuts", () => {
     pizzaThemeExtension(api as any);
 
     const ctx = createMockContext({ themes: [] });
-    await registeredShortcuts.get("ctrl+x").handler(ctx);
+    await registeredShortcuts.get("ctrl+q").handler(ctx);
 
     expect(ctx.ui.setTheme).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith("No themes available", "warning");
@@ -141,7 +129,7 @@ describe("pizza-theme cycler — shortcuts", () => {
     pizzaThemeExtension(api as any);
 
     const ctx = createMockContext({ hasUI: false });
-    await registeredShortcuts.get("ctrl+x").handler(ctx);
+    await registeredShortcuts.get("ctrl+q").handler(ctx);
 
     expect(ctx.ui.setTheme).not.toHaveBeenCalled();
     expect(ctx.ui.setStatus).not.toHaveBeenCalled();
@@ -154,7 +142,7 @@ describe("pizza-theme cycler — shortcuts", () => {
     pizzaThemeExtension(api as any);
 
     const ctx = createMockContext({ active: "pizzeria" });
-    await registeredShortcuts.get("ctrl+x").handler(ctx);
+    await registeredShortcuts.get("ctrl+q").handler(ctx);
 
     expect(ctx.ui.setWidget).toHaveBeenCalledWith(
       "pizza.theme.swatch",
@@ -173,10 +161,10 @@ describe("pizza-theme cycler — shortcuts", () => {
     pizzaThemeExtension(api as any);
 
     const ctx = createMockContext({ active: "pizzeria" });
-    await registeredShortcuts.get("ctrl+x").handler(ctx);
+    await registeredShortcuts.get("ctrl+q").handler(ctx);
 
     vi.advanceTimersByTime(1000);
-    await registeredShortcuts.get("ctrl+x").handler(ctx);
+    await registeredShortcuts.get("ctrl+q").handler(ctx);
 
     // After 2500ms more (total 3500ms, 2500ms since the second cycle) the
     // first timer would have fired at 3000ms — but it should have been cleared.
@@ -215,6 +203,28 @@ describe("pizza-theme cycler — /theme command", () => {
 
     expect(ctx.ui.setTheme).toHaveBeenCalledWith("dracula");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Theme: dracula", "info");
+  });
+
+  it("/theme next cycles forward", async () => {
+    const { api, registeredCommands } = createMockApi();
+    pizzaThemeExtension(api as any);
+
+    const ctx = createMockContext({ active: "pizzeria" });
+    await registeredCommands.get("theme").handler("next", ctx);
+
+    expect(ctx.ui.setTheme).toHaveBeenCalledWith("dracula");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("dracula (2/2)", "info");
+  });
+
+  it("/theme prev cycles backward wrapping around", async () => {
+    const { api, registeredCommands } = createMockApi();
+    pizzaThemeExtension(api as any);
+
+    const ctx = createMockContext({ active: "pizzeria" });
+    await registeredCommands.get("theme").handler("prev", ctx);
+
+    expect(ctx.ui.setTheme).toHaveBeenCalledWith("dracula");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("dracula (2/2)", "info");
   });
 
   it("/theme with no args opens the picker", async () => {
@@ -256,6 +266,7 @@ describe("pizza-theme cycler — /theme command", () => {
     expect(ctx.ui.setTheme).not.toHaveBeenCalled();
     const call = ctx.ui.notify.mock.calls.at(-1)!;
     expect(call[0]).toContain("Unknown theme: nope");
+    expect(call[0]).toContain("/theme next");
     expect(call[1]).toBe("warning");
   });
 
